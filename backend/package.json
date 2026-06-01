@@ -10,6 +10,8 @@
     "type-check": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:remote": "wrangler d1 migrations apply sparqplug-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply sparqplug-db --local",
     "db:studio": "drizzle-kit studio",
     "db:push": "wrangler d1 execute sparqplug-db --local --file=./drizzle/schema.sql"
   },
