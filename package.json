@@ -1,0 +1,60 @@
+{
+  "name": "sparqplug",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SparQPlug - Your business. Fully connected.",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "pnpm --filter @sparqplug/web dev",
+    "dev:web": "pnpm --filter @sparqplug/web dev",
+    "dev:desktop": "pnpm --filter @sparqplug/desktop dev",
+    "dev:mobile": "pnpm --filter @sparqplug/mobile start",
+    "dev:backend": "pnpm --filter @sparqplug/backend dev",
+    "dev:all": "turbo run dev --parallel",
+
+    "build": "turbo run build",
+    "build:web": "pnpm --filter @sparqplug/web build",
+    "build:desktop": "pnpm --filter @sparqplug/desktop build",
+    "build:mobile:android": "pnpm --filter @sparqplug/mobile build:android",
+    "build:mobile:ios": "pnpm --filter @sparqplug/mobile build:ios",
+    "build:mobile:ios:internal": "pnpm --filter @sparqplug/mobile build:ios:internal",
+    "build:mobile:ios:testflight": "pnpm --filter @sparqplug/mobile build:ios:testflight",
+    "build:backend": "pnpm --filter @sparqplug/backend build",
+
+    "submit:android": "pnpm --filter @sparqplug/mobile submit:android",
+    "submit:ios": "pnpm --filter @sparqplug/mobile submit:ios",
+    "submit:mobile:ios:testflight": "pnpm --filter @sparqplug/mobile submit:ios:testflight",
+    "release:mobile:ios:testflight": "pnpm --filter @sparqplug/mobile release:ios:testflight",
+    "ota:mobile:internal": "pnpm --filter @sparqplug/mobile ota:update:internal",
+    "ota:mobile:production": "pnpm --filter @sparqplug/mobile ota:update:production",
+    "deploy:backend": "pnpm --filter @sparqplug/backend deploy",
+
+    "bootstrap": "node -e \"fetch('http://localhost:8787/api/bootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:process.env.BOOTSTRAP_SECRET})}).then(r=>r.json()).then(console.log).catch(console.error)\"",
+
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "db:generate": "pnpm --filter @sparqplug/backend db:generate",
+    "db:migrate": "pnpm --filter @sparqplug/backend db:migrate"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "18.2.0",
+      "react-dom": "18.2.0",
+      "lightningcss": "^1.27.0"
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

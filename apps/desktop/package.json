@@ -1,0 +1,51 @@
+{
+  "name": "@sparqplug/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SparQPlug Desktop (Electron)",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\" \"pnpm --filter @sparqplug/web dev\"",
+    "build": "pnpm --filter @sparqplug/web build && tsc -p tsconfig.electron.json && electron-builder",
+    "type-check": "tsc --noEmit -p tsconfig.electron.json"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^32.0.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.5.0"
+  },
+  "build": {
+    "appId": "com.sparqplug.desktop",
+    "productName": "SparQPlug",
+    "directories": {
+      "buildResources": "assets",
+      "output": "out"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png"
+    },
+    "extraMetadata": {
+      "main": "dist/electron/main.js"
+    }
+  }
+}

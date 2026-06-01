@@ -1,0 +1,52 @@
+name = "sparqplug-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+# Local-only bootstrap vars — override with wrangler secret put in production
+BOOTSTRAP_SECRET = "dev_bootstrap_secret"
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_PASSWORD = "changeme123"
+ADMIN_NAME = "Admin"
+ADMIN_ORG_NAME = "SparQPlug"
+FIREBASE_API_KEY = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sparqplug-db"
+database_id = "YOUR_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "sparqplug-files"
+
+[[queues.producers]]
+binding = "EMAIL_QUEUE"
+queue = "sparqplug-emails"
+
+[[queues.consumers]]
+queue = "sparqplug-emails"
+max_batch_size = 10
+max_batch_timeout = 30
+
+[durable_objects]
+bindings = [
+  { name = "REALTIME_DO", class_name = "RealtimeDurableObject" },
+  { name = "RECORD_LOCK_DO", class_name = "RecordLockDurableObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RealtimeDurableObject", "RecordLockDurableObject"]
+
+# Secrets — set via: wrangler secret put SECRET_NAME
+# Required secrets:
+# STRIPE_SECRET_KEY
+# STRIPE_WEBHOOK_SECRET
+# FIREBASE_SERVICE_ACCOUNT
+# JWT_SECRET
+# CLOUDFLARE_ANALYTICS_TOKEN
+# Optional but recommended for CRM password locker encryption isolation:
+# PASSWORD_LOCKER_KEY
