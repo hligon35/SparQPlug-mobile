@@ -67,8 +67,11 @@ app.use(
         'https://app.sparqplug.io',
         'https://sparqplug.io',
         'https://sparqplug.getsparqd.com',
+        'https://sparqplug-web.pages.dev',
       ];
-      return allowed.includes(origin ?? '') ? origin : null;
+      if (allowed.includes(origin ?? '')) return origin;
+      if (origin?.endsWith('.sparqplug-web.pages.dev')) return origin;
+      return null;
     },
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

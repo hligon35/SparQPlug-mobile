@@ -16,7 +16,7 @@ FIREBASE_API_KEY = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "sparqplug-db"
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "8330f49d-2bff-4525-b48f-082f08bd22b7"
 
 [[r2_buckets]]
 binding = "STORAGE"
@@ -26,11 +26,6 @@ bucket_name = "sparqplug-files"
 binding = "EMAIL_QUEUE"
 queue = "sparqplug-emails"
 
-[[queues.consumers]]
-queue = "sparqplug-emails"
-max_batch_size = 10
-max_batch_timeout = 30
-
 [durable_objects]
 bindings = [
   { name = "REALTIME_DO", class_name = "RealtimeDurableObject" },
@@ -39,7 +34,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RealtimeDurableObject", "RecordLockDurableObject"]
+new_sqlite_classes = ["RealtimeDurableObject", "RecordLockDurableObject"]
 
 # Secrets — set via: wrangler secret put SECRET_NAME
 # Required secrets:
