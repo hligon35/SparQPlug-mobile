@@ -9,6 +9,7 @@ import {
   CreditCard,
   FileText,
   FolderOpen,
+  ShieldCheck,
   KeyRound,
   Settings,
   ChevronLeft,
@@ -38,6 +39,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Invoices', href: '/billing/invoices', icon: FileText, group: 'Billing' },
   { label: 'Subscriptions', href: '/billing/subscriptions', icon: CreditCard, group: 'Billing' },
   { label: 'Documents', href: '/documents', icon: FolderOpen },
+  { label: 'Network Ops', href: '/network-ops', icon: ShieldCheck },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 

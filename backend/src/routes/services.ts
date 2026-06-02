@@ -54,7 +54,150 @@ const ExpenseLogSchema = z.object({
   ).default([]),
 });
 
+const NetworkOpsRemoteTestsSchema = z.object({
+  vpnDomain: z.string().min(3),
+  piholeDomain: z.string().min(3),
+});
+
+type RemoteTestStatus = 'pass' | 'fail' | 'warn';
+
+type RemoteNetworkTest = {
+  id: string;
+  label: string;
+  status: RemoteTestStatus;
+  detail: string;
+  durationMs: number;
+  source: 'backend';
+};
+
+function normalizeDomain(input: string): string {
+  return input.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 7000): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function runRemoteTest(
+  id: string,
+  label: string,
+  fn: () => Promise<{ status: RemoteTestStatus; detail: string }>,
+): Promise<RemoteNetworkTest> {
+  const startedAt = Date.now();
+
+  try {
+    const result = await fn();
+    return {
+      id,
+      label,
+      status: result.status,
+      detail: result.detail,
+      durationMs: Math.max(1, Date.now() - startedAt),
+      source: 'backend',
+    };
+  } catch (err) {
+    return {
+      id,
+      label,
+      status: 'fail',
+      detail: err instanceof Error ? err.message : 'Test failed due to an unknown error.',
+      durationMs: Math.max(1, Date.now() - startedAt),
+      source: 'backend',
+    };
+  }
+}
+
 // ─── Service Catalog CRUD ─────────────────────────────────────────────────────
+
+servicesRouter.get('/network-ops/remote-tests', zValidator('query', NetworkOpsRemoteTestsSchema), async (c) => {
+  const { vpnDomain, piholeDomain } = c.req.valid('query');
+  const cleanVpnDomain = normalizeDomain(vpnDomain);
+  const cleanPiHoleDomain = normalizeDomain(piholeDomain);
+  const requestOrigin = new URL(c.req.url).origin;
+
+  const tests: RemoteNetworkTest[] = [];
+
+  tests.push(await runRemoteTest('api-health', 'Backend health endpoint', async () => {
+    const response = await fetchWithTimeout(`${requestOrigin}/health`, { method: 'GET' }, 6000);
+    if (!response.ok) {
+      return { status: 'fail', detail: `Health endpoint returned HTTP ${response.status}.` };
+    }
+    return { status: 'pass', detail: `Health endpoint responded HTTP ${response.status}.` };
+  }));
+
+  tests.push(await runRemoteTest('vpn-public-dns', 'VPN public DNS lookup', async () => {
+    const params = new URLSearchParams({ name: cleanVpnDomain, type: 'A' }).toString();
+    const response = await fetchWithTimeout(`https://cloudflare-dns.com/dns-query?${params}`, {
+      method: 'GET',
+      headers: { Accept: 'application/dns-json' },
+    }, 7000);
+
+    if (!response.ok) {
+      return { status: 'fail', detail: `DNS lookup request failed with HTTP ${response.status}.` };
+    }
+
+    const payload = await response.json() as { Answer?: Array<{ type?: number; data?: string }>; Status?: number };
+    const ips = (payload.Answer ?? [])
+      .filter((answer) => answer.type === 1 && typeof answer.data === 'string')
+      .map((answer) => (answer.data ?? '').trim())
+      .filter(Boolean);
+
+    if (ips.length === 0) {
+      return { status: 'fail', detail: 'No public A records found for VPN domain.' };
+    }
+
+    return { status: 'pass', detail: `Resolved A records: ${ips.join(', ')}` };
+  }));
+
+  tests.push(await runRemoteTest('backend-egress-ip', 'Backend public egress IP', async () => {
+    const response = await fetchWithTimeout('https://api.ipify.org', { method: 'GET' }, 6000);
+    if (!response.ok) {
+      return { status: 'warn', detail: `Could not retrieve egress IP (HTTP ${response.status}).` };
+    }
+    const ip = (await response.text()).trim();
+    return { status: ip ? 'pass' : 'warn', detail: ip ? `Backend egress IP: ${ip}` : 'No IP text returned by provider.' };
+  }));
+
+  tests.push(await runRemoteTest('pihole-public-exposure', 'Pi-hole public exposure check', async () => {
+    try {
+      const response = await fetchWithTimeout(`http://${cleanPiHoleDomain}/admin/login`, {
+        method: 'GET',
+        redirect: 'manual',
+      }, 5000);
+
+      if (response.ok || (response.status >= 300 && response.status < 400)) {
+        return {
+          status: 'warn',
+          detail: `Pi-hole admin appears reachable from the public internet (HTTP ${response.status}).`,
+        };
+      }
+
+      return {
+        status: 'pass',
+        detail: `Pi-hole admin not publicly reachable with a successful response (HTTP ${response.status}).`,
+      };
+    } catch {
+      return {
+        status: 'pass',
+        detail: 'Pi-hole admin is not publicly reachable from backend context (expected for private setup).',
+      };
+    }
+  }));
+
+  return c.json({
+    success: true,
+    data: {
+      executedAt: new Date().toISOString(),
+      tests,
+    },
+  });
+});
 
 servicesRouter.get('/', async (c) => {
   const orgId = c.get('organizationId');

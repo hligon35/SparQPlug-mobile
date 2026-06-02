@@ -29,6 +29,8 @@ import { BillingInvoicesPage } from '@/pages/billing/invoices';
 import { BillingSubscriptionsPage } from '@/pages/billing/subscriptions';
 import { DocumentsPage } from '@/pages/documents';
 import { SettingsPage } from '@/pages/settings';
+import { NetworkOpsPage } from '@/pages/network-ops/index';
+import { NetworkOpsGuidePage } from '@/pages/network-ops/guide';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -123,6 +125,10 @@ export default function App() {
                 {/* Documents */}
                 <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/documents/:folderId" element={<DocumentsPage />} />
+
+                {/* Network Ops */}
+                <Route path="/network-ops" element={<NetworkOpsPage />} />
+                <Route path="/network-ops/guide" element={<NetworkOpsGuidePage />} />
 
                 {/* Settings */}
                 <Route path="/settings" element={<SettingsPage />} />

@@ -30,6 +30,16 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="network-ops-guide"
+              options={{
+                headerShown: true,
+                title: 'Network Ops Guide',
+                headerStyle: { backgroundColor: '#0f1f2f' },
+                headerTintColor: '#f4f8ff',
+                headerShadowVisible: false,
+              }}
+            />
           </Stack>
         </QueryClientProvider>
       </SafeAreaProvider>

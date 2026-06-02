@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { Search, LayoutDashboard, Users, Building2, TrendingUp, BarChart3, FileText, FolderOpen, Settings, CreditCard, KeyRound } from 'lucide-react';
+import { Search, LayoutDashboard, Users, Building2, TrendingUp, BarChart3, FileText, FolderOpen, Settings, CreditCard, KeyRound, ShieldCheck } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +22,7 @@ const COMMANDS: CommandItem[] = [
   { label: 'Invoices', href: '/billing/invoices', icon: FileText, group: 'Billing' },
   { label: 'Subscriptions', href: '/billing/subscriptions', icon: CreditCard, group: 'Billing' },
   { label: 'Documents', href: '/documents', icon: FolderOpen, group: 'Navigation' },
+  { label: 'Network Ops', href: '/network-ops', icon: ShieldCheck, group: 'Navigation' },
   { label: 'Settings', href: '/settings', icon: Settings, group: 'Navigation' },
 ];
 

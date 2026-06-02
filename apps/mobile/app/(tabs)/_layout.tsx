@@ -52,6 +52,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="network"
+        options={{
+          title: 'Network',
+          tabBarIcon: ({ color, size }) => <Ionicons name="shield-checkmark-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="more"
         options={{
           title: 'More',
