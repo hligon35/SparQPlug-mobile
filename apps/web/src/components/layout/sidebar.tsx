@@ -69,19 +69,16 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div className="flex h-14 items-center justify-between px-3 border-b border-sidebar-border">
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
-              <span className="text-white text-xs font-bold">S</span>
-            </div>
-            <span className="font-bold text-sidebar-foreground truncate">SparQPlug</span>
-          </div>
-        )}
-        {collapsed && (
-          <div className="h-7 w-7 rounded-lg bg-primary flex items-center justify-center mx-auto">
-            <span className="text-white text-xs font-bold">S</span>
-          </div>
-        )}
+        <div className="flex items-center min-w-0">
+          <img
+            src={collapsed ? '/sparqplugIcon.png' : '/sparqplugLogo.png'}
+            alt="SparQPlug"
+            className={cn(
+              'block object-contain',
+              collapsed ? 'h-8 w-8' : 'h-8 w-auto max-w-[140px]'
+            )}
+          />
+        </div>
         {!sidebarIconOnly && (
           <button
             onClick={toggleSidebar}

@@ -4,7 +4,7 @@
     "slug": "sparqplug",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/sparqplugIcon.png",
     "scheme": "sparqplug",
     "userInterfaceStyle": "automatic",
     "splash": {
@@ -16,20 +16,25 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sparqplug.app",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to unlock client passwords in SparQPlug Password Locker."
+        "NSFaceIDUsageDescription": "Use Face ID to unlock client passwords in SparQPlug Password Locker.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/sparqplugIcon.png",
         "backgroundColor": "#0a0f1e"
       },
-      "package": "com.sparqplug.app"
+      "package": "com.sparqplug.app",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/sparqplugIcon.png"
     },
     "plugins": [
       "expo-router",
@@ -48,10 +53,19 @@
           "resizeMode": "contain",
           "backgroundColor": "#0a0f1e"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "4558c317-f31b-45e1-9b38-58c734947a75"
+      }
     }
   }
 }
