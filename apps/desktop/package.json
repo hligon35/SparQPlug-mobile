@@ -2,11 +2,15 @@
   "name": "@sparqplug/desktop",
   "version": "1.0.0",
   "private": true,
+  "author": "Harold Ligon",
   "description": "SparQPlug Desktop (Electron)",
   "main": "dist/electron/main.js",
   "scripts": {
     "dev": "concurrently \"cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\" \"pnpm --filter @sparqplug/web dev\"",
-    "build": "pnpm --filter @sparqplug/web build:deploy && tsc -p tsconfig.electron.json && electron-builder",
+    "prepare:build-output": "node scripts/prepare-build-output.cjs",
+    "build": "pnpm run prepare:build-output && pnpm --filter @sparqplug/web build:deploy && tsc -p tsconfig.electron.json && electron-builder",
+    "install:latest": "node scripts/install-latest-build.cjs",
+    "build:install": "pnpm build && pnpm run install:latest",
     "type-check": "tsc --noEmit -p tsconfig.electron.json"
   },
   "dependencies": {
@@ -36,7 +40,7 @@
     ],
     "win": {
       "target": ["portable"],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.png"
     },
     "mac": {
       "target": ["dmg", "zip"],

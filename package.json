@@ -20,6 +20,7 @@
     "build:web": "pnpm --filter @sparqplug/web build",
     "build:web:deploy": "pnpm --filter @sparqplug/web build:deploy",
     "build:desktop": "pnpm --filter @sparqplug/desktop build",
+    "build:desktop:install": "pnpm --filter @sparqplug/desktop build:install",
     "build:mobile:android": "pnpm --filter @sparqplug/mobile build:android",
     "build:mobile:ios": "pnpm --filter @sparqplug/mobile build:ios",
     "build:mobile:ios:internal": "pnpm --filter @sparqplug/mobile build:ios:internal",

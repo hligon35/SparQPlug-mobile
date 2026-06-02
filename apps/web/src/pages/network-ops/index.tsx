@@ -151,9 +151,9 @@ export function NetworkOpsPage() {
         <header className="rounded-2xl border border-sky-900/60 bg-slate-950/55 p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">SparQPlug Network Ops</p>
-              <h1 className="mt-2 text-3xl font-semibold text-slate-50">VPN + Pi-hole Control Center</h1>
-              <p className="mt-2 text-sm text-slate-300/90">Built for your live domains and tuned for remote diagnostics.</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">Network Ops</p>
+              <h1 className="mt-2 text-3xl font-semibold text-slate-50">DarkSkyHole Control Center</h1>
+              <p className="mt-2 text-sm text-slate-300/90">Built and tuned for live domains and remote diagnostics.</p>
             </div>
             <div className="flex items-center gap-2">
               <button
