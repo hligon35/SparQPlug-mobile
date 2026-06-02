@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
-    "fs-extra": "^11.2.0"
+    "fs-extra": "^11.2.0",
+    "jsonfile": "^6.2.1",
+    "universalify": "^2.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -39,16 +41,24 @@
       "node_modules/**/*"
     ],
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "icon": "assets/icon.png"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.business"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png"
     },
     "extraMetadata": {

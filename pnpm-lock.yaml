@@ -31,6 +31,12 @@ importers:
       fs-extra:
         specifier: ^11.2.0
         version: 11.3.5
+      jsonfile:
+        specifier: ^6.2.1
+        version: 6.2.1
+      universalify:
+        specifier: ^2.0.1
+        version: 2.0.1
     devDependencies:
       '@types/node':
         specifier: ^20.0.0

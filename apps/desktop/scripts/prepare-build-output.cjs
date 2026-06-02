@@ -54,21 +54,25 @@ async function removeWinUnpackedWithRetry() {
     return;
   }
 
-  const retries = 6;
-  let lastError = null;
+  const retries = 20;
+  const escapedWinUnpackedDir = winUnpackedDir.replace(/'/g, "''");
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
       fs.rmSync(winUnpackedDir, { recursive: true, force: true });
       console.log(`Cleaned stale directory: ${winUnpackedDir}`);
       return;
-    } catch (error) {
-      lastError = error;
-      await wait(300 * attempt);
+    } catch (_error) {
+      if (process.platform === 'win32' && attempt === 8) {
+        // Fallback path for stubborn Windows file locks.
+        runPowerShell(`Remove-Item -LiteralPath '${escapedWinUnpackedDir}' -Recurse -Force -ErrorAction SilentlyContinue`);
+      }
+
+      await wait(350 * attempt);
     }
   }
 
-  throw lastError;
+  console.warn(`Could not remove stale directory before build: ${winUnpackedDir}`);
 }
 
 async function removePortableExesWithRetry() {
@@ -104,6 +108,7 @@ async function removePortableExesWithRetry() {
 
 async function main() {
   stopProcessesUsingOutDir();
+  await wait(500);
   await removePortableExesWithRetry();
   await removeWinUnpackedWithRetry();
 }
