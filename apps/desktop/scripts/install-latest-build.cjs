@@ -25,19 +25,25 @@ function scoreCandidate(filePath) {
   const fileName = path.basename(filePath).toLowerCase();
   let score = 0;
 
-  if (fileName.includes('setup')) score += 100;
-  if (fileName.includes('installer')) score += 90;
-  if (fileName.includes('portable')) score += 80;
-  if (fileName.includes('sparqplug')) score += 50;
+  if (/^sparqplug( \d+\.\d+\.\d+)?( portable)?\.exe$/.test(fileName)) score += 500;
+  if (fileName.includes('portable')) score += 300;
+  if (fileName.includes('sparqplug')) score += 120;
+  if (fileName.includes('setup')) score -= 250;
+  if (fileName.includes('installer')) score -= 250;
 
   return score;
 }
 
 function pickBestExecutable(files) {
-  const exes = files
+  const toCandidates = (allowInstallers) => files
     .filter((f) => f.toLowerCase().endsWith('.exe'))
     .filter((f) => !f.toLowerCase().includes(`${path.sep}win-unpacked${path.sep}`))
     .filter((f) => !path.basename(f).toLowerCase().includes('unins'))
+    .filter((f) => {
+      if (allowInstallers) return true;
+      const fileName = path.basename(f).toLowerCase();
+      return !fileName.includes('setup') && !fileName.includes('installer');
+    })
     .map((f) => {
       const stat = fs.statSync(f);
       return {
@@ -47,12 +53,15 @@ function pickBestExecutable(files) {
       };
     });
 
-  exes.sort((a, b) => {
+  const exes = toCandidates(false);
+  const candidates = exes.length > 0 ? exes : toCandidates(true);
+
+  candidates.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return b.mtimeMs - a.mtimeMs;
   });
 
-  return exes[0] || null;
+  return candidates[0] || null;
 }
 
 if (process.platform !== 'win32') {

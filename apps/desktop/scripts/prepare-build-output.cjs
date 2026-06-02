@@ -3,7 +3,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const outDir = path.resolve(process.cwd(), 'out');
-const winUnpackedDir = path.join(outDir, 'win-unpacked');
+const buildOutputDir = path.join(outDir, 'build');
+const activeWinUnpackedDir = path.join(buildOutputDir, 'win-unpacked');
+const legacyWinUnpackedDir = path.join(outDir, 'win-unpacked');
 
 function runPowerShell(command) {
   return spawnSync(
@@ -27,9 +29,12 @@ function stopProcessesUsingOutDir() {
     `$outDir = '${escapedOutDir}'`,
     'Get-CimInstance Win32_Process | ForEach-Object {',
     '  $exePath = $_.ExecutablePath',
-    "  if ($exePath -and $exePath.StartsWith($outDir, [System.StringComparison]::OrdinalIgnoreCase)) {",
+    '  $commandLine = $_.CommandLine',
+    "  $usesOutDir = ($exePath -and $exePath.StartsWith($outDir, [System.StringComparison]::OrdinalIgnoreCase)) -or ($commandLine -and $commandLine.IndexOf($outDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)",
+    '  if ($usesOutDir) {',
     '    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue',
-    '    Write-Output ("Stopped process " + $_.ProcessId + ": " + $exePath)',
+    '    $pathInfo = if ($exePath) { $exePath } else { $commandLine }',
+    '    Write-Output ("Stopped process " + $_.ProcessId + ": " + $pathInfo)',
     '  }',
     '}',
   ].join('; ');
@@ -49,30 +54,44 @@ async function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function removeWinUnpackedWithRetry() {
-  if (!fs.existsSync(winUnpackedDir)) {
+async function removeDirWithRetry(dirPath, { required }) {
+  if (!fs.existsSync(dirPath)) {
     return;
   }
 
   const retries = 20;
-  const escapedWinUnpackedDir = winUnpackedDir.replace(/'/g, "''");
+  const escapedDir = dirPath.replace(/'/g, "''");
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      fs.rmSync(winUnpackedDir, { recursive: true, force: true });
-      console.log(`Cleaned stale directory: ${winUnpackedDir}`);
+      fs.rmSync(dirPath, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 250,
+      });
+      console.log(`Cleaned stale directory: ${dirPath}`);
       return;
     } catch (_error) {
       if (process.platform === 'win32' && attempt === 8) {
         // Fallback path for stubborn Windows file locks.
-        runPowerShell(`Remove-Item -LiteralPath '${escapedWinUnpackedDir}' -Recurse -Force -ErrorAction SilentlyContinue`);
+        runPowerShell(`Remove-Item -LiteralPath '${escapedDir}' -Recurse -Force -ErrorAction SilentlyContinue`);
       }
 
       await wait(350 * attempt);
     }
   }
 
-  console.warn(`Could not remove stale directory before build: ${winUnpackedDir}`);
+  if (required) {
+    throw new Error(`Could not remove stale directory before build: ${dirPath}`);
+  }
+
+  console.warn(`Could not remove stale legacy directory: ${dirPath}`);
+}
+
+async function removeWinUnpackedWithRetry() {
+  await removeDirWithRetry(activeWinUnpackedDir, { required: true });
+  await removeDirWithRetry(legacyWinUnpackedDir, { required: false });
 }
 
 async function removePortableExesWithRetry() {
@@ -80,10 +99,31 @@ async function removePortableExesWithRetry() {
     return;
   }
 
-  const exeFiles = fs
-    .readdirSync(outDir)
-    .filter((name) => name.toLowerCase().endsWith('.exe'))
-    .map((name) => path.join(outDir, name));
+  const exeFiles = [];
+  const stack = [outDir];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+
+      if (entry.isDirectory()) {
+        if (entry.name.toLowerCase() === 'win-unpacked') {
+          continue;
+        }
+        stack.push(fullPath);
+        continue;
+      }
+
+      if (entry.isFile() && entry.name.toLowerCase().endsWith('.exe')) {
+        exeFiles.push(fullPath);
+      }
+    }
+  }
 
   for (const exeFile of exeFiles) {
     const retries = 6;

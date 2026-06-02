@@ -1,11 +1,38 @@
 import { app, BrowserWindow, ipcMain, shell, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import type { AppUpdater } from 'electron-updater';
 import * as path from 'path';
 
 const isDev = process.env['NODE_ENV'] === 'development' || !!process.env['VITE_DEV_SERVER_URL'];
 const DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'] ?? 'http://localhost:5173';
 
 let mainWindow: BrowserWindow | null = null;
+let autoUpdaterInstance: AppUpdater | null = null;
+
+function setupAutoUpdater() {
+  if (isDev) {
+    return;
+  }
+
+  try {
+    const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
+
+    const updater = autoUpdater;
+    autoUpdaterInstance = updater;
+
+    updater.on('update-available', () => {
+      mainWindow?.webContents.send('updater:update-available');
+    });
+
+    updater.on('update-downloaded', () => {
+      mainWindow?.webContents.send('updater:update-downloaded');
+    });
+
+    updater.checkForUpdatesAndNotify();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[desktop] Auto-updater disabled: ${message}`);
+  }
+}
 
 function navigateInApp(pathname: string) {
   if (!mainWindow) return;
@@ -13,8 +40,18 @@ function navigateInApp(pathname: string) {
   const escapedPath = JSON.stringify(pathname);
   const script = `
     (() => {
-      if (window.location.pathname !== ${escapedPath}) {
-        window.history.pushState({}, '', ${escapedPath});
+      const target = ${escapedPath};
+
+      if (window.location.protocol === 'file:') {
+        const hashTarget = '#' + target;
+        if (window.location.hash !== hashTarget) {
+          window.location.hash = hashTarget;
+        }
+        return;
+      }
+
+      if (window.location.pathname !== target) {
+        window.history.pushState({}, '', target);
         window.dispatchEvent(new PopStateEvent('popstate'));
       }
     })();
@@ -99,14 +136,12 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   setupMenu();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  if (!isDev) {
-    autoUpdater.checkForUpdatesAndNotify();
-  }
 });
 
 app.on('window-all-closed', () => {
@@ -131,16 +166,6 @@ ipcMain.on('window:maximize', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 
-// ─── Auto updater ─────────────────────────────────────────────────────────────
-
-autoUpdater.on('update-available', () => {
-  mainWindow?.webContents.send('updater:update-available');
-});
-
-autoUpdater.on('update-downloaded', () => {
-  mainWindow?.webContents.send('updater:update-downloaded');
-});
-
 ipcMain.on('updater:install', () => {
-  autoUpdater.quitAndInstall();
+  autoUpdaterInstance?.quitAndInstall();
 });

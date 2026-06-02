@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/providers/auth-provider';
 import { ThemeProvider } from '@/providers/theme-provider';
@@ -81,10 +81,13 @@ function RootRedirect() {
 }
 
 export default function App() {
+  const useHashRouter = typeof window !== 'undefined' && window.location.protocol === 'file:';
+  const Router = useHashRouter ? HashRouter : BrowserRouter;
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="dark" storageKey="sparqplug-theme">
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AuthProvider>
             <Routes>
               <Route path="/" element={<RootRedirect />} />
@@ -141,7 +144,7 @@ export default function App() {
 
             <Toaster />
           </AuthProvider>
-        </BrowserRouter>
+        </Router>
       </ThemeProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
