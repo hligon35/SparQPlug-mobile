@@ -46,7 +46,7 @@ export const authMiddleware: MiddlewareHandler<{
     c.set('organizationId', user.organizationId);
     c.set('userRole', user.role);
 
-    await next();
+    return next();
   } catch (err) {
     console.error('[Auth Middleware]', err);
     return c.json(

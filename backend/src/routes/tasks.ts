@@ -11,13 +11,13 @@ import { z } from 'zod';
 export const tasksRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 tasksRouter.use('*', authMiddleware);
 
-tasksRouter.get('/', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.string().optional(), priority: z.string().optional(), assigneeId: z.string().optional() })), async (c) => {
+tasksRouter.get('/', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.enum(['todo', 'in_progress', 'completed', 'cancelled']).optional(), priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(), assigneeId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status, priority, assigneeId } = c.req.valid('query');
   const db = createDb(c.env.DB);
   const conditions = [eq(tasks.organizationId, orgId)];
-  if (status) conditions.push(eq(tasks.status, status as typeof tasks.status._type));
-  if (priority) conditions.push(eq(tasks.priority, priority as typeof tasks.priority._type));
+  if (status) conditions.push(eq(tasks.status, status));
+  if (priority) conditions.push(eq(tasks.priority, priority));
   if (assigneeId) conditions.push(eq(tasks.assigneeId, assigneeId));
   const offset = (page - 1) * limit;
   const [rows, countResult] = await Promise.all([

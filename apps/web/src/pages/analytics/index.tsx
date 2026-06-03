@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -163,14 +163,15 @@ export function AnalyticsPage() {
   const { data: domainsData } = useQuery({
     queryKey: ['analytics-domains'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<AnalyticsDomain>>>('/analytics/domains'),
-    onSuccess: (res) => {
-      if (res.data?.items[0] && !selectedDomain) {
-        setSelectedDomain(res.data.items[0].zoneId);
-      }
-    },
   });
 
   const domains = domainsData?.data?.items ?? [];
+
+  useEffect(() => {
+    if (!selectedDomain && domains[0]) {
+      setSelectedDomain(domains[0].zoneId);
+    }
+  }, [domains, selectedDomain]);
 
   const { data: snapshotData, isLoading } = useQuery({
     queryKey: ['analytics-snapshot', selectedDomain, dateRange],

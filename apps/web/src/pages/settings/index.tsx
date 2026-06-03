@@ -291,11 +291,24 @@ const EMPTY_SERVICE = {
   billingCycle: 'monthly' as const, url: '', notes: '', isActive: true,
 };
 
+type ServiceForm = {
+  name: string;
+  provider: string;
+  category: ServiceCategory;
+  billingType: 'fixed' | 'per_seat' | 'usage';
+  unitCostCents: number;
+  defaultMarkupPct: number;
+  billingCycle: 'monthly' | 'annual' | 'one_time';
+  url: string;
+  notes: string;
+  isActive: boolean;
+};
+
 function ServicesSection() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_SERVICE });
+  const [form, setForm] = useState<ServiceForm>({ ...EMPTY_SERVICE });
 
   const { data, isLoading } = useQuery({
     queryKey: ['services-catalog'],

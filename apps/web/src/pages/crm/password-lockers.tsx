@@ -244,9 +244,10 @@ export function PasswordLockersPage() {
   async function handleCopy(id: string) {
     let value = revealedById[id];
     if (!value) {
-      value = await revealMutation.mutateAsync(id);
-      if (!value) return;
-      setRevealedById((current) => ({ ...current, [id]: value }));
+      const revealed = await revealMutation.mutateAsync(id);
+      if (!revealed) return;
+      value = revealed;
+      setRevealedById((current) => ({ ...current, [id]: revealed }));
     }
 
     try {

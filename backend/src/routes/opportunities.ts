@@ -19,7 +19,7 @@ opportunitiesRouter.get(
     z.object({
       page: z.coerce.number().default(1),
       limit: z.coerce.number().max(100).default(25),
-      stage: z.string().optional(),
+      stage: z.enum(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost']).optional(),
       ownerId: z.string().optional(),
       companyId: z.string().optional(),
     }),
@@ -30,7 +30,7 @@ opportunitiesRouter.get(
     const db = createDb(c.env.DB);
 
     const conditions = [eq(opportunities.organizationId, orgId)];
-    if (stage) conditions.push(eq(opportunities.stage, stage as typeof opportunities.stage._type));
+    if (stage) conditions.push(eq(opportunities.stage, stage));
     if (ownerId) conditions.push(eq(opportunities.ownerId, ownerId));
     if (companyId) conditions.push(eq(opportunities.companyId, companyId));
 

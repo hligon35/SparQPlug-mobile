@@ -103,6 +103,8 @@ export interface Company extends BaseEntity {
   customFields: Record<string, unknown>;
   organizationId: string;
   contactCount: number;
+  employeeCount?: number;
+  description?: string | null;
   logoUrl?: string;
   lastActivityAt?: string;
 }
@@ -110,6 +112,8 @@ export interface Company extends BaseEntity {
 // ─── Opportunity ──────────────────────────────────────────────────────────────
 
 export type OpportunityStage =
+  | 'lead'
+  | 'qualified'
   | 'prospecting'
   | 'qualification'
   | 'proposal'
@@ -155,6 +159,7 @@ export interface Opportunity extends BaseEntity {
   value: number;
   currency: string;
   probability: number;
+  closeDate?: string | null;
   expectedCloseDate?: string | null;
   source?: string | null;
   tags: string[];

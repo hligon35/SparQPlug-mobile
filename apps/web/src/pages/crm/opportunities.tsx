@@ -12,6 +12,8 @@ const STAGES: OpportunityStage[] = ['lead', 'qualified', 'proposal', 'negotiatio
 const STAGE_COLORS: Record<OpportunityStage, string> = {
   lead: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
   qualified: 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
+  prospecting: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  qualification: 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
   proposal: 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400',
   negotiation: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
   closed_won: 'bg-green-500/15 text-green-600 dark:text-green-400',
@@ -19,7 +21,14 @@ const STAGE_COLORS: Record<OpportunityStage, string> = {
 };
 
 const STAGE_PROBABILITIES: Record<OpportunityStage, string> = {
-  lead: '10', qualified: '30', proposal: '50', negotiation: '75', closed_won: '100', closed_lost: '0',
+  lead: '10',
+  qualified: '30',
+  prospecting: '10',
+  qualification: '30',
+  proposal: '50',
+  negotiation: '75',
+  closed_won: '100',
+  closed_lost: '0',
 };
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';

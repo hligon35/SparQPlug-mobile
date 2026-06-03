@@ -97,7 +97,6 @@ passwordLockersRouter.get('/:id', async (c) => {
 
   const locker = await db.query.passwordLockers.findFirst({
     where: and(eq(passwordLockers.id, c.req.param('id')), eq(passwordLockers.organizationId, orgId)),
-    with: { contact: true, company: true },
   });
 
   if (!locker) {
@@ -107,12 +106,25 @@ passwordLockersRouter.get('/:id', async (c) => {
     );
   }
 
+  const [contact, company] = await Promise.all([
+    locker.contactId
+      ? db.query.contacts.findFirst({
+          where: and(eq(contacts.id, locker.contactId), eq(contacts.organizationId, orgId)),
+        })
+      : Promise.resolve(null),
+    locker.companyId
+      ? db.query.companies.findFirst({
+          where: and(eq(companies.id, locker.companyId), eq(companies.organizationId, orgId)),
+        })
+      : Promise.resolve(null),
+  ]);
+
   return c.json({
     success: true,
     data: {
       ...sanitizeLocker(locker),
-      contactName: locker.contact ? `${locker.contact.firstName} ${locker.contact.lastName}` : null,
-      companyName: locker.company?.name ?? null,
+      contactName: contact ? `${contact.firstName} ${contact.lastName}` : null,
+      companyName: company?.name ?? null,
     },
   });
 });

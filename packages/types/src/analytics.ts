@@ -2,6 +2,7 @@
 
 export interface AnalyticsDomain {
   id: string;
+  domain: string;
   name: string;
   zoneId: string;
   status: 'active' | 'inactive';
@@ -26,6 +27,7 @@ export interface AnalyticsDateFilter {
 // ─── Traffic Metrics ─────────────────────────────────────────────────────────
 
 export interface TrafficMetrics {
+  requests: number;
   totalRequests: number;
   uniqueVisitors: number;
   pageViews: number;
@@ -52,6 +54,7 @@ export interface TrafficDataPoint {
 // ─── Top Pages / Countries ────────────────────────────────────────────────────
 
 export interface TopPage {
+  url: string;
   path: string;
   requests: number;
   visitors: number;
@@ -59,6 +62,7 @@ export interface TopPage {
 }
 
 export interface TopCountry {
+  country: string;
   countryCode: string;
   countryName: string;
   requests: number;
@@ -96,6 +100,7 @@ export interface AnalyticsSnapshot {
   domainId: string;
   zoneId: string;
   metrics: TrafficMetrics;
+  timeseries: TrafficDataPoint[];
   trafficTimeseries: TrafficDataPoint[];
   topPages: TopPage[];
   topCountries: TopCountry[];

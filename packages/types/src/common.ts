@@ -12,6 +12,7 @@ export type Pagination = z.infer<typeof PaginationSchema>;
 
 export interface PaginatedResponse<T> {
   data: T[];
+  items: T[];
   total: number;
   page: number;
   limit: number;

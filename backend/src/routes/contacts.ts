@@ -23,7 +23,7 @@ contactsRouter.get(
       page: z.coerce.number().default(1),
       limit: z.coerce.number().max(100).default(25),
       search: z.string().optional(),
-      status: z.string().optional(),
+      status: z.enum(['active', 'inactive', 'lead', 'prospect', 'customer']).optional(),
       companyId: z.string().optional(),
       ownerId: z.string().optional(),
       sort: z.string().default('created_at'),
@@ -37,7 +37,7 @@ contactsRouter.get(
 
     const conditions = [eq(contacts.organizationId, orgId)];
     if (search) conditions.push(like(contacts.firstName, `%${search}%`));
-    if (status) conditions.push(eq(contacts.status, status as typeof contacts.status._type));
+    if (status) conditions.push(eq(contacts.status, status));
     if (companyId) conditions.push(eq(contacts.companyId, companyId));
     if (ownerId) conditions.push(eq(contacts.ownerId, ownerId));
 
@@ -103,7 +103,7 @@ contactsRouter.post('/', zValidator('json', ContactSchema), async (c) => {
   await db.insert(contacts).values({
     id,
     organizationId: orgId,
-    createdBy: userId,
+    ownerId: userId,
     ...data,
   });
 

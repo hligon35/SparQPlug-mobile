@@ -54,12 +54,12 @@ billingRouter.post('/customers', zValidator('json', z.object({ email: z.string()
 
 // ─── Invoices ─────────────────────────────────────────────────────────────────
 
-billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.string().optional(), customerId: z.string().optional() })), async (c) => {
+billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.enum(['draft', 'open', 'paid', 'void', 'uncollectible']).optional(), customerId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status, customerId } = c.req.valid('query');
   const db = createDb(c.env.DB);
   const conditions = [eq(stripeInvoices.organizationId, orgId)];
-  if (status) conditions.push(eq(stripeInvoices.status, status as typeof stripeInvoices.status._type));
+  if (status) conditions.push(eq(stripeInvoices.status, status));
   if (customerId) conditions.push(eq(stripeInvoices.customerId, customerId));
   const offset = (page - 1) * limit;
   const [rows, countResult] = await Promise.all([
@@ -121,12 +121,12 @@ billingRouter.post('/invoices/:id/void', async (c) => {
 
 // ─── Subscriptions ────────────────────────────────────────────────────────────
 
-billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.string().optional() })), async (c) => {
+billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid', 'paused']).optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status } = c.req.valid('query');
   const db = createDb(c.env.DB);
   const conditions = [eq(stripeSubscriptions.organizationId, orgId)];
-  if (status) conditions.push(eq(stripeSubscriptions.status, status as typeof stripeSubscriptions.status._type));
+  if (status) conditions.push(eq(stripeSubscriptions.status, status));
   const offset = (page - 1) * limit;
   const [rows, countResult] = await Promise.all([
     db.query.stripeSubscriptions.findMany({ where: and(...conditions), limit, offset, orderBy: [desc(stripeSubscriptions.createdAt)], with: { customer: true } }),

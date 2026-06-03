@@ -17,6 +17,8 @@
     "dev:all": "turbo run dev --parallel",
 
     "build": "turbo run build",
+    "package": "pnpm --filter @sparqplug/desktop run build",
+    "dist": "pnpm --filter @sparqplug/desktop run build",
     "build:web": "pnpm --filter @sparqplug/web build",
     "build:web:deploy": "pnpm --filter @sparqplug/web build:deploy",
     "build:desktop": "pnpm --filter @sparqplug/desktop build",
@@ -43,6 +45,7 @@
 
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
+    "verify": "node scripts/verify-runtime-deps.cjs && pnpm run type-check && pnpm --filter @sparqplug/web run lint && pnpm --filter @sparqplug/web run build:deploy && pnpm --filter @sparqplug/desktop run build && node apps/desktop/scripts/verify-desktop-package.cjs",
     "db:generate": "pnpm --filter @sparqplug/backend db:generate",
     "db:migrate": "pnpm --filter @sparqplug/backend db:migrate"
   },

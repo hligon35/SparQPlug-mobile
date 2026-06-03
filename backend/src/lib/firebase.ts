@@ -3,6 +3,7 @@
 
 interface FirebaseTokenPayload {
   uid: string;
+  sub?: string;
   email?: string;
   name?: string;
   picture?: string;
@@ -62,8 +63,11 @@ export async function verifyFirebaseToken(
 
     if (!isValid) return null;
 
+    const uid = payload.uid || payload.sub;
+    if (!uid) return null;
+
     return {
-      uid: payload.uid || (payload as Record<string, unknown>)['sub'] as string,
+      uid,
       email: payload.email,
       displayName: payload.name,
     };

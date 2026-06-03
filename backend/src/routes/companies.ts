@@ -20,7 +20,7 @@ companiesRouter.get(
       page: z.coerce.number().default(1),
       limit: z.coerce.number().max(100).default(25),
       search: z.string().optional(),
-      status: z.string().optional(),
+      status: z.enum(['active', 'inactive', 'prospect', 'customer', 'churned']).optional(),
     }),
   ),
   async (c) => {
@@ -30,7 +30,7 @@ companiesRouter.get(
 
     const conditions = [eq(companies.organizationId, orgId)];
     if (search) conditions.push(like(companies.name, `%${search}%`));
-    if (status) conditions.push(eq(companies.status, status as typeof companies.status._type));
+    if (status) conditions.push(eq(companies.status, status));
 
     const offset = (page - 1) * limit;
 
@@ -74,7 +74,7 @@ companiesRouter.post('/', zValidator('json', CompanySchema), async (c) => {
   const db = createDb(c.env.DB);
 
   const id = generateId();
-  await db.insert(companies).values({ id, organizationId: orgId, createdBy: userId, ...data });
+  await db.insert(companies).values({ id, organizationId: orgId, ownerId: userId, ...data });
   const company = await db.query.companies.findFirst({ where: eq(companies.id, id) });
   return c.json({ success: true, data: company }, 201);
 });

@@ -11,14 +11,14 @@ import { z } from 'zod';
 export const activitiesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 activitiesRouter.use('*', authMiddleware);
 
-activitiesRouter.get('/', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), contactId: z.string().optional(), companyId: z.string().optional(), type: z.string().optional() })), async (c) => {
+activitiesRouter.get('/', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), contactId: z.string().optional(), companyId: z.string().optional(), type: z.enum(['call', 'email', 'meeting', 'note', 'task', 'demo', 'follow_up']).optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, contactId, companyId, type } = c.req.valid('query');
   const db = createDb(c.env.DB);
   const conditions = [eq(activities.organizationId, orgId)];
   if (contactId) conditions.push(eq(activities.contactId, contactId));
   if (companyId) conditions.push(eq(activities.companyId, companyId));
-  if (type) conditions.push(eq(activities.type, type as typeof activities.type._type));
+  if (type) conditions.push(eq(activities.type, type));
   const offset = (page - 1) * limit;
   const [rows, countResult] = await Promise.all([
     db.query.activities.findMany({ where: and(...conditions), limit, offset, orderBy: [desc(activities.createdAt)] }),
