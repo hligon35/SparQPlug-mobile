@@ -79,8 +79,8 @@ function maskPassword(value: string): string {
 }
 
 function getItems<T>(response?: ApiResponse<PaginatedResponse<T>>): T[] {
-  const payload = response?.data as unknown as { items?: T[]; data?: T[] } | undefined;
-  return payload?.items ?? payload?.data ?? [];
+  if (!response?.data) return [];
+  return response.data.items ?? response.data.data ?? [];
 }
 
 export default function CRMScreen() {
@@ -96,12 +96,12 @@ export default function CRMScreen() {
   const [companyTargetContact, setCompanyTargetContact] = useState<Contact | null>(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
 
-  const { data: contactsData, isLoading: contactsLoading } = useQuery({
+  const { data: contactsData, isLoading: contactsLoading } = useQuery<ApiResponse<PaginatedResponse<Contact>>>({
     queryKey: ['contacts', { page: 1 }],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Contact>>>('/contacts', { limit: 30 }),
   });
 
-  const { data: lockersData, isLoading: lockersLoading } = useQuery({
+  const { data: lockersData, isLoading: lockersLoading } = useQuery<ApiResponse<PaginatedResponse<PasswordLocker>>>({
     queryKey: ['password-lockers', { page: 1, search }],
     queryFn: () =>
       api.get<ApiResponse<PaginatedResponse<PasswordLocker>>>('/password-lockers', {
@@ -111,7 +111,7 @@ export default function CRMScreen() {
       }),
   });
 
-  const { data: companiesData } = useQuery({
+  const { data: companiesData } = useQuery<ApiResponse<PaginatedResponse<Company>>>({
     queryKey: ['companies', { page: 1 }],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Company>>>('/companies', { page: 1, limit: 200 }),
   });
@@ -174,9 +174,9 @@ export default function CRMScreen() {
     },
   });
 
-  const contacts = getItems(contactsData);
-  const companies = getItems(companiesData);
-  const lockers = getItems(lockersData);
+  const contacts = getItems<Contact>(contactsData);
+  const companies = getItems<Company>(companiesData);
+  const lockers = getItems<PasswordLocker>(lockersData);
 
   const updateContactCompanyMutation = useMutation({
     mutationFn: ({ contactId, companyId }: { contactId: string; companyId: string | null }) =>
@@ -342,7 +342,7 @@ export default function CRMScreen() {
           {contactsLoading ? (
             <ActivityIndicator color={COLORS.primary} style={{ marginTop: 32 }} />
           ) : (
-            <FlatList
+            <FlatList<Contact>
               data={contacts}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.list}
@@ -394,7 +394,7 @@ export default function CRMScreen() {
           {lockersLoading ? (
             <ActivityIndicator color={COLORS.primary} style={{ marginTop: 32 }} />
           ) : (
-            <FlatList
+            <FlatList<PasswordLocker>
               data={lockers}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.list}
@@ -574,7 +574,7 @@ export default function CRMScreen() {
                 </Text>
               </TouchableOpacity>
 
-              {companies.map((company) => {
+              {companies.map((company: Company) => {
                 const active = selectedCompanyId === company.id;
                 return (
                   <TouchableOpacity

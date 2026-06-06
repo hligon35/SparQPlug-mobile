@@ -13,17 +13,17 @@ function formatBytes(b: number) {
 }
 
 function getItems<T>(response?: ApiResponse<PaginatedResponse<T>>): T[] {
-  const payload = response?.data as unknown as { items?: T[]; data?: T[] } | undefined;
-  return payload?.items ?? payload?.data ?? [];
+  if (!response?.data) return [];
+  return response.data.items ?? response.data.data ?? [];
 }
 
 export default function DocumentsScreen() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<ApiResponse<PaginatedResponse<Document>>>({
     queryKey: ['documents-mobile'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Document>>>('/documents', { folderId: 'root', limit: 30 }),
   });
 
-  const docs = getItems(data);
+  const docs = getItems<Document>(data);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -35,7 +35,7 @@ export default function DocumentsScreen() {
       {isLoading ? (
         <ActivityIndicator color={COLORS.primary} style={{ marginTop: 32 }} />
       ) : (
-        <FlatList
+        <FlatList<Document>
           data={docs}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}

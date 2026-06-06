@@ -15,17 +15,17 @@ const STATUS_COLOR: Record<InvoiceStatus, string> = {
 };
 
 function getItems<T>(response?: ApiResponse<PaginatedResponse<T>>): T[] {
-  const payload = response?.data as unknown as { items?: T[]; data?: T[] } | undefined;
-  return payload?.items ?? payload?.data ?? [];
+  if (!response?.data) return [];
+  return response.data.items ?? response.data.data ?? [];
 }
 
 export default function BillingScreen() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<ApiResponse<PaginatedResponse<StripeInvoice>>>({
     queryKey: ['billing-invoices-mobile'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<StripeInvoice>>>('/billing/invoices', { limit: 20 }),
   });
 
-  const invoices = getItems(data);
+  const invoices = getItems<StripeInvoice>(data);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -37,7 +37,7 @@ export default function BillingScreen() {
       {isLoading ? (
         <ActivityIndicator color={COLORS.primary} style={{ marginTop: 32 }} />
       ) : (
-        <FlatList
+        <FlatList<StripeInvoice>
           data={invoices}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
