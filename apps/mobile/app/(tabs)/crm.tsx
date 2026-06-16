@@ -10,6 +10,7 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Pressable,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +26,8 @@ import type {
   PasswordLocker,
   PasswordLockerService,
   PasswordReveal,
+  ContactInput,
+  CompanyInput,
 } from '@sparqplug/types';
 
 const COLORS = {
@@ -63,6 +66,24 @@ type LockerForm = {
   notes: string;
 };
 
+type ContactForm = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  title: string;
+  status: ContactInput['status'];
+  companyId: string;
+};
+
+type CompanyForm = {
+  name: string;
+  industry: string;
+  website: string;
+  size: NonNullable<CompanyInput['size']> | '';
+  status: CompanyInput['status'];
+};
+
 const EMPTY_FORM: LockerForm = {
   label: '',
   service: 'other',
@@ -72,6 +93,28 @@ const EMPTY_FORM: LockerForm = {
   password: '',
   notes: '',
 };
+
+const EMPTY_CONTACT_FORM: ContactForm = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  title: '',
+  status: 'lead',
+  companyId: '',
+};
+
+const EMPTY_COMPANY_FORM: CompanyForm = {
+  name: '',
+  industry: '',
+  website: '',
+  size: '',
+  status: 'prospect',
+};
+
+const CONTACT_STATUSES: Array<ContactInput['status']> = ['lead', 'active', 'prospect', 'customer', 'inactive'];
+const COMPANY_STATUSES: Array<CompanyInput['status']> = ['prospect', 'active', 'customer', 'inactive', 'churned'];
+const COMPANY_SIZES: Array<NonNullable<CompanyInput['size']>> = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
 
 function maskPassword(value: string): string {
   if (!value) return '••••••••';
@@ -95,6 +138,10 @@ export default function CRMScreen() {
   const [companyModalVisible, setCompanyModalVisible] = useState(false);
   const [companyTargetContact, setCompanyTargetContact] = useState<Contact | null>(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [contactFormVisible, setContactFormVisible] = useState(false);
+  const [companyCreateVisible, setCompanyCreateVisible] = useState(false);
+  const [contactForm, setContactForm] = useState<ContactForm>(EMPTY_CONTACT_FORM);
+  const [companyForm, setCompanyForm] = useState<CompanyForm>(EMPTY_COMPANY_FORM);
 
   const { data: contactsData, isLoading: contactsLoading } = useQuery<ApiResponse<PaginatedResponse<Contact>>>({
     queryKey: ['contacts', { page: 1 }],
@@ -191,6 +238,48 @@ export default function CRMScreen() {
     onError: () => Alert.alert('Error', 'Could not update contact company.'),
   });
 
+  const createContactMutation = useMutation({
+    mutationFn: (payload: ContactForm) =>
+      api.post('/contacts', {
+        firstName: payload.firstName.trim(),
+        lastName: payload.lastName.trim(),
+        email: payload.email.trim() || null,
+        phone: payload.phone.trim() || null,
+        title: payload.title.trim() || null,
+        companyId: payload.companyId || null,
+        status: payload.status,
+        tags: [],
+        customFields: {},
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      setContactFormVisible(false);
+      setContactForm(EMPTY_CONTACT_FORM);
+      Alert.alert('Saved', 'Contact created successfully.');
+    },
+    onError: (error) => Alert.alert('Error', getErrorMessage(error, 'Could not create contact.')),
+  });
+
+  const createCompanyMutation = useMutation({
+    mutationFn: (payload: CompanyForm) =>
+      api.post('/companies', {
+        name: payload.name.trim(),
+        industry: payload.industry.trim() || null,
+        website: payload.website.trim() || null,
+        size: payload.size || null,
+        status: payload.status,
+        tags: [],
+        customFields: {},
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] });
+      setCompanyCreateVisible(false);
+      setCompanyForm(EMPTY_COMPANY_FORM);
+      Alert.alert('Saved', 'Company created successfully.');
+    },
+    onError: (error) => Alert.alert('Error', getErrorMessage(error, 'Could not create company.')),
+  });
+
   const canUseBiometric = useMemo(() => unlockedAt != null && Date.now() - unlockedAt < 120000, [unlockedAt]);
 
   async function ensureBiometric(): Promise<boolean> {
@@ -220,6 +309,16 @@ export default function CRMScreen() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setFormVisible(true);
+  }
+
+  function openCreateContact() {
+    setContactForm(EMPTY_CONTACT_FORM);
+    setContactFormVisible(true);
+  }
+
+  function openCreateCompany() {
+    setCompanyForm(EMPTY_COMPANY_FORM);
+    setCompanyCreateVisible(true);
   }
 
   function openCompanyLink(contact: Contact) {
@@ -315,6 +414,24 @@ export default function CRMScreen() {
     }
   }
 
+  function submitContactForm() {
+    if (!contactForm.firstName.trim() || !contactForm.lastName.trim()) {
+      Alert.alert('Required', 'First and last name are required.');
+      return;
+    }
+
+    createContactMutation.mutate(contactForm);
+  }
+
+  function submitCompanyForm() {
+    if (!companyForm.name.trim()) {
+      Alert.alert('Required', 'Company name is required.');
+      return;
+    }
+
+    createCompanyMutation.mutate(companyForm);
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -339,6 +456,15 @@ export default function CRMScreen() {
 
       {tab === 'contacts' && (
         <>
+          <View style={styles.crmToolsRow}>
+            <Pressable style={[styles.secondaryButton, styles.crmActionButton]} onPress={openCreateCompany}>
+              <Text style={styles.secondaryButtonText}>+ Company</Text>
+            </Pressable>
+            <Pressable style={[styles.primaryButton, styles.crmActionButton]} onPress={openCreateContact}>
+              <Text style={styles.primaryButtonText}>+ Contact</Text>
+            </Pressable>
+          </View>
+
           {contactsLoading ? (
             <ActivityIndicator color={COLORS.primary} style={{ marginTop: 32 }} />
           ) : (
@@ -614,12 +740,218 @@ export default function CRMScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={contactFormVisible} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>New Contact</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                style={styles.field}
+                placeholder="First name"
+                placeholderTextColor={COLORS.muted}
+                value={contactForm.firstName}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, firstName: value }))}
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Last name"
+                placeholderTextColor={COLORS.muted}
+                value={contactForm.lastName}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, lastName: value }))}
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Email"
+                placeholderTextColor={COLORS.muted}
+                value={contactForm.email}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, email: value }))}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Phone"
+                placeholderTextColor={COLORS.muted}
+                value={contactForm.phone}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: value }))}
+                keyboardType="phone-pad"
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Job title"
+                placeholderTextColor={COLORS.muted}
+                value={contactForm.title}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, title: value }))}
+              />
+
+              <Text style={styles.sectionLabel}>Status</Text>
+              <View style={styles.serviceWrap}>
+                {CONTACT_STATUSES.map((status) => {
+                  const active = contactForm.status === status;
+                  return (
+                    <TouchableOpacity
+                      key={status}
+                      onPress={() => setContactForm((prev) => ({ ...prev, status }))}
+                      style={[styles.serviceChip, active && styles.serviceChipActive]}
+                    >
+                      <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{status}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.sectionLabel}>Company</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.inlineOptionList}>
+                <TouchableOpacity
+                  style={[styles.companyOption, styles.inlineCompanyOption, contactForm.companyId === '' && styles.companyOptionActive]}
+                  onPress={() => setContactForm((prev) => ({ ...prev, companyId: '' }))}
+                >
+                  <Text style={[styles.companyOptionText, contactForm.companyId === '' && styles.companyOptionTextActive]}>
+                    No company
+                  </Text>
+                </TouchableOpacity>
+                {companies.map((company) => {
+                  const active = contactForm.companyId === company.id;
+                  return (
+                    <TouchableOpacity
+                      key={company.id}
+                      style={[styles.companyOption, styles.inlineCompanyOption, active && styles.companyOptionActive]}
+                      onPress={() => setContactForm((prev) => ({ ...prev, companyId: company.id }))}
+                    >
+                      <Text style={[styles.companyOptionText, active && styles.companyOptionTextActive]}>{company.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, { flex: 1 }]}
+                onPress={() => {
+                  setContactFormVisible(false);
+                  setContactForm(EMPTY_CONTACT_FORM);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, { flex: 1 }]}
+                onPress={submitContactForm}
+                disabled={createContactMutation.isPending}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {createContactMutation.isPending ? 'Saving...' : 'Create Contact'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={companyCreateVisible} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>New Company</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                style={styles.field}
+                placeholder="Company name"
+                placeholderTextColor={COLORS.muted}
+                value={companyForm.name}
+                onChangeText={(value) => setCompanyForm((prev) => ({ ...prev, name: value }))}
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Industry"
+                placeholderTextColor={COLORS.muted}
+                value={companyForm.industry}
+                onChangeText={(value) => setCompanyForm((prev) => ({ ...prev, industry: value }))}
+              />
+              <TextInput
+                style={styles.field}
+                placeholder="Website"
+                placeholderTextColor={COLORS.muted}
+                value={companyForm.website}
+                onChangeText={(value) => setCompanyForm((prev) => ({ ...prev, website: value }))}
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.sectionLabel}>Company size</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.inlineOptionList}>
+                <TouchableOpacity
+                  style={[styles.companyOption, styles.inlineCompanyOption, companyForm.size === '' && styles.companyOptionActive]}
+                  onPress={() => setCompanyForm((prev) => ({ ...prev, size: '' }))}
+                >
+                  <Text style={[styles.companyOptionText, companyForm.size === '' && styles.companyOptionTextActive]}>
+                    Not set
+                  </Text>
+                </TouchableOpacity>
+                {COMPANY_SIZES.map((size) => {
+                  const active = companyForm.size === size;
+                  return (
+                    <TouchableOpacity
+                      key={size}
+                      style={[styles.companyOption, styles.inlineCompanyOption, active && styles.companyOptionActive]}
+                      onPress={() => setCompanyForm((prev) => ({ ...prev, size }))}
+                    >
+                      <Text style={[styles.companyOptionText, active && styles.companyOptionTextActive]}>{size}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={styles.sectionLabel}>Status</Text>
+              <View style={styles.serviceWrap}>
+                {COMPANY_STATUSES.map((status) => {
+                  const active = companyForm.status === status;
+                  return (
+                    <TouchableOpacity
+                      key={status}
+                      onPress={() => setCompanyForm((prev) => ({ ...prev, status }))}
+                      style={[styles.serviceChip, active && styles.serviceChipActive]}
+                    >
+                      <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{status}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, { flex: 1 }]}
+                onPress={() => {
+                  setCompanyCreateVisible(false);
+                  setCompanyForm(EMPTY_COMPANY_FORM);
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, { flex: 1 }]}
+                onPress={submitCompanyForm}
+                disabled={createCompanyMutation.isPending}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {createCompanyMutation.isPending ? 'Saving...' : 'Create Company'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 function serviceLabel(service: PasswordLockerService): string {
   return SERVICES.find((item) => item.value === service)?.label ?? 'Other';
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 const styles = StyleSheet.create({
@@ -640,6 +972,8 @@ const styles = StyleSheet.create({
   tabBtnActive: { backgroundColor: `${COLORS.primary}25` },
   tabText: { color: COLORS.muted, fontWeight: '600', fontSize: 13 },
   tabTextActive: { color: COLORS.primary },
+  crmToolsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 10 },
+  crmActionButton: { flex: 1, minHeight: 42 },
   lockerToolsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 6 },
   searchWrap: {
     flex: 1,
@@ -738,6 +1072,7 @@ const styles = StyleSheet.create({
   serviceChipText: { color: COLORS.muted, fontSize: 12, fontWeight: '600' },
   serviceChipTextActive: { color: COLORS.primary },
   helperText: { color: COLORS.muted, fontSize: 12, marginBottom: 10 },
+  inlineOptionList: { paddingBottom: 8, gap: 8 },
   companyList: { maxHeight: 280, marginBottom: 12 },
   companyOption: {
     borderWidth: 1,
@@ -748,6 +1083,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 8,
   },
+  inlineCompanyOption: { marginBottom: 0, minWidth: 110 },
   companyOptionActive: {
     borderColor: COLORS.primary,
     backgroundColor: `${COLORS.primary}20`,

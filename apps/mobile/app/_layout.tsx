@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider } from '@/lib/auth-provider';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,21 +27,24 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="network-ops-guide"
-              options={{
-                headerShown: true,
-                title: 'Network Ops Guide',
-                headerStyle: { backgroundColor: '#0f1f2f' },
-                headerTintColor: '#f4f8ff',
-                headerShadowVisible: false,
-              }}
-            />
-          </Stack>
+          <AuthProvider>
+            <StatusBar style="light" />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="network-ops-guide"
+                options={{
+                  headerShown: true,
+                  title: 'Network Ops Guide',
+                  headerStyle: { backgroundColor: '#0f1f2f' },
+                  headerTintColor: '#f4f8ff',
+                  headerShadowVisible: false,
+                }}
+              />
+            </Stack>
+          </AuthProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

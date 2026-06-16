@@ -1,10 +1,27 @@
 import { Tabs } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
+import { Redirect, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
+import { useAuthStore } from '@/stores/auth-store';
 
 const COLORS = { active: '#3b82f6', inactive: '#94a3b8', background: '#0a0f1e', border: '#1e2a3a' };
 
 export default function TabLayout() {
+  const { user, isLoading } = useAuthStore();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={COLORS.active} />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return <Redirect href={'/sign-in' as Href} />;
+  }
+
   return (
     <Tabs
       screenOptions={{
