@@ -21,6 +21,17 @@ export function buildPagination(page: number, limit: number, total: number) {
   };
 }
 
+export function buildPaginatedResult<T>(items: T[], page: number, limit: number, total: number) {
+  return {
+    data: items,
+    items,
+    total,
+    page,
+    limit,
+    hasMore: page * limit < total,
+  };
+}
+
 // ─── Slug ─────────────────────────────────────────────────────────────────────
 
 export function toSlug(str: string): string {

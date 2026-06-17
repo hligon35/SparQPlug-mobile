@@ -6,7 +6,7 @@ import type { Bindings, Variables } from '../index';
 import { createDb } from '../db';
 import { stripeCustomers, stripeInvoices, stripeSubscriptions } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
-import { generateId, buildPagination } from '../lib/utils';
+import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
 import { CreateInvoiceSchema } from '@sparqplug/types';
 
@@ -19,7 +19,7 @@ function getStripe(secretKey: string) {
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 
-billingRouter.get('/customers', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), search: z.string().optional() })), async (c) => {
+billingRouter.get('/customers', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), search: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit } = c.req.valid('query');
   const db = createDb(c.env.DB);
@@ -29,7 +29,7 @@ billingRouter.get('/customers', zValidator('query', z.object({ page: z.coerce.nu
     db.query.stripeCustomers.findMany({ where: and(...conditions), limit, offset, orderBy: [desc(stripeCustomers.createdAt)] }),
     db.select({ count: sql<number>`count(*)` }).from(stripeCustomers).where(and(...conditions)),
   ]);
-  return c.json({ success: true, data: rows, meta: buildPagination(page, limit, countResult[0]?.count ?? 0) });
+  return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0) });
 });
 
 billingRouter.get('/customers/:id', async (c) => {
@@ -54,7 +54,7 @@ billingRouter.post('/customers', zValidator('json', z.object({ email: z.string()
 
 // ─── Invoices ─────────────────────────────────────────────────────────────────
 
-billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.enum(['draft', 'open', 'paid', 'void', 'uncollectible']).optional(), customerId: z.string().optional() })), async (c) => {
+billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), status: z.enum(['draft', 'open', 'paid', 'void', 'uncollectible']).optional(), customerId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status, customerId } = c.req.valid('query');
   const db = createDb(c.env.DB);
@@ -66,7 +66,7 @@ billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.num
     db.query.stripeInvoices.findMany({ where: and(...conditions), limit, offset, orderBy: [desc(stripeInvoices.createdAt)], with: { customer: true } }),
     db.select({ count: sql<number>`count(*)` }).from(stripeInvoices).where(and(...conditions)),
   ]);
-  return c.json({ success: true, data: rows, meta: buildPagination(page, limit, countResult[0]?.count ?? 0) });
+  return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0) });
 });
 
 billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (c) => {
@@ -121,7 +121,7 @@ billingRouter.post('/invoices/:id/void', async (c) => {
 
 // ─── Subscriptions ────────────────────────────────────────────────────────────
 
-billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(100).default(25), status: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid', 'paused']).optional() })), async (c) => {
+billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), status: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid', 'paused']).optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status } = c.req.valid('query');
   const db = createDb(c.env.DB);
@@ -132,7 +132,7 @@ billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerc
     db.query.stripeSubscriptions.findMany({ where: and(...conditions), limit, offset, orderBy: [desc(stripeSubscriptions.createdAt)], with: { customer: true } }),
     db.select({ count: sql<number>`count(*)` }).from(stripeSubscriptions).where(and(...conditions)),
   ]);
-  return c.json({ success: true, data: rows, meta: buildPagination(page, limit, countResult[0]?.count ?? 0) });
+  return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0) });
 });
 
 // ─── Revenue Metrics ──────────────────────────────────────────────────────────
@@ -158,4 +158,8 @@ billingRouter.get('/metrics', async (c) => {
       pastDueSubscriptions: pastDueResult[0]?.count ?? 0,
     },
   });
+});
+
+billingRouter.get('/revenue-metrics', async (c) => {
+  return billingRouter.fetch(new Request(new URL('/metrics', c.req.url), { method: 'GET', headers: c.req.raw.headers }), c.env, c.executionCtx);
 });

@@ -7,18 +7,42 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_USE_METRO_WORKSPACE_ROOT": "1"
+        "EXPO_USE_METRO_WORKSPACE_ROOT": "1",
+        "EXPO_PUBLIC_API_BASE_URL": "https://sparqplug-api.hligon.workers.dev/api/v1",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAQcMkDRbf5mbgeqiirlt0jcpA2K5eifXE",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sparqplug-64f2b.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sparqplug-64f2b",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sparqplug-64f2b.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "1026157911910",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1026157911910:web:6b1093ea614b9e0c4732a7",
+        "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "G-T4P29CQ8F8"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_USE_METRO_WORKSPACE_ROOT": "1"
+        "EXPO_USE_METRO_WORKSPACE_ROOT": "1",
+        "EXPO_PUBLIC_API_BASE_URL": "https://sparqplug-api.hligon.workers.dev/api/v1",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAQcMkDRbf5mbgeqiirlt0jcpA2K5eifXE",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sparqplug-64f2b.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sparqplug-64f2b",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sparqplug-64f2b.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "1026157911910",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1026157911910:web:6b1093ea614b9e0c4732a7",
+        "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "G-T4P29CQ8F8"
       }
     },
     "production": {
       "env": {
-        "EXPO_USE_METRO_WORKSPACE_ROOT": "1"
+        "EXPO_USE_METRO_WORKSPACE_ROOT": "1",
+        "EXPO_PUBLIC_API_BASE_URL": "https://sparqplug-api.hligon.workers.dev/api/v1",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAQcMkDRbf5mbgeqiirlt0jcpA2K5eifXE",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "sparqplug-64f2b.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "sparqplug-64f2b",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "sparqplug-64f2b.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "1026157911910",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1026157911910:web:6b1093ea614b9e0c4732a7",
+        "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "G-T4P29CQ8F8"
       }
     }
   },

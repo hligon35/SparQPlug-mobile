@@ -14,8 +14,8 @@ interface CommandItem {
 
 const COMMANDS: CommandItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, group: 'Navigation' },
-  { label: 'Contacts', href: '/crm/contacts', icon: Users, group: 'CRM' },
   { label: 'Companies', href: '/crm/companies', icon: Building2, group: 'CRM' },
+  { label: 'Contacts', href: '/crm/contacts', icon: Users, group: 'CRM' },
   { label: 'Opportunities', href: '/crm/opportunities', icon: TrendingUp, group: 'CRM' },
   { label: 'Password Locker', href: '/crm/password-lockers', icon: KeyRound, group: 'CRM' },
   { label: 'Analytics', href: '/analytics', icon: BarChart3, group: 'Navigation' },

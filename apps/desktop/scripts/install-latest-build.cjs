@@ -1,101 +1,126 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
-const outDir = path.resolve(process.cwd(), 'out');
+const desktopRoot = process.cwd();
+const outDir = path.resolve(desktopRoot, 'out');
+const buildDir = path.join(outDir, 'build');
+const winUnpackedDir = path.join(buildDir, 'win-unpacked');
+const appExeName = 'SparQPlug.exe';
+const localAppData = process.env.LOCALAPPDATA;
+const appData = process.env.APPDATA;
+const userProfile = process.env.USERPROFILE;
 
-function walk(dir) {
-  if (!fs.existsSync(dir)) return [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  const files = [];
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
 
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...walk(fullPath));
-    } else {
-      files.push(fullPath);
-    }
+function ensureWindowsEnv(name, value) {
+  if (!value) {
+    fail(`Required Windows environment variable is missing: ${name}`);
   }
 
-  return files;
+  return value;
 }
 
-function scoreCandidate(filePath) {
-  const fileName = path.basename(filePath).toLowerCase();
-  let score = 0;
-
-  if (/^sparqplug( \d+\.\d+\.\d+)?( portable)?\.exe$/.test(fileName)) score += 500;
-  if (fileName.includes('portable')) score += 300;
-  if (fileName.includes('sparqplug')) score += 120;
-  if (fileName.includes('setup')) score -= 250;
-  if (fileName.includes('installer')) score -= 250;
-
-  return score;
+function runPowerShell(command) {
+  return spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
-function pickBestExecutable(files) {
-  const toCandidates = (allowInstallers) => files
-    .filter((f) => f.toLowerCase().endsWith('.exe'))
-    .filter((f) => !f.toLowerCase().includes(`${path.sep}win-unpacked${path.sep}`))
-    .filter((f) => !path.basename(f).toLowerCase().includes('unins'))
-    .filter((f) => {
-      if (allowInstallers) return true;
-      const fileName = path.basename(f).toLowerCase();
-      return !fileName.includes('setup') && !fileName.includes('installer');
-    })
-    .map((f) => {
-      const stat = fs.statSync(f);
-      return {
-        path: f,
-        mtimeMs: stat.mtimeMs,
-        score: scoreCandidate(f),
-      };
-    });
+function stopRunningInstalledApp(executablePath) {
+  const escapedExePath = executablePath.replace(/'/g, "''");
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$target = '${escapedExePath}'`,
+    'Get-CimInstance Win32_Process | ForEach-Object {',
+    '  if ($_.ExecutablePath -and $_.ExecutablePath.Equals($target, [System.StringComparison]::OrdinalIgnoreCase)) {',
+    '    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue',
+    '  }',
+    '}',
+  ].join('; ');
 
-  const exes = toCandidates(false);
-  const candidates = exes.length > 0 ? exes : toCandidates(true);
+  runPowerShell(script);
+}
 
-  candidates.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return b.mtimeMs - a.mtimeMs;
+function copyDirectory(sourceDir, targetDir) {
+  fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+  fs.rmSync(targetDir, { recursive: true, force: true });
+  fs.cpSync(sourceDir, targetDir, { recursive: true, force: true });
+}
+
+function createShortcut(shortcutPath, targetPath, workingDirectory) {
+  const escapedShortcut = shortcutPath.replace(/'/g, "''");
+  const escapedTarget = targetPath.replace(/'/g, "''");
+  const escapedWorkingDir = workingDirectory.replace(/'/g, "''");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$shortcutPath = '${escapedShortcut}'`,
+    `$targetPath = '${escapedTarget}'`,
+    `$workingDirectory = '${escapedWorkingDir}'`,
+    '$shortcutDir = Split-Path -Parent $shortcutPath',
+    'New-Item -ItemType Directory -Force -Path $shortcutDir | Out-Null',
+    '$shell = New-Object -ComObject WScript.Shell',
+    '$shortcut = $shell.CreateShortcut($shortcutPath)',
+    '$shortcut.TargetPath = $targetPath',
+    '$shortcut.WorkingDirectory = $workingDirectory',
+    '$shortcut.IconLocation = $targetPath',
+    '$shortcut.Save()',
+  ].join('; ');
+
+  const result = runPowerShell(script);
+  if (result.status !== 0) {
+    fail(`Failed to create shortcut ${shortcutPath}: ${result.stderr.trim() || 'unknown error'}`);
+  }
+}
+
+function launchInstalledApp(executablePath) {
+  const child = spawn(executablePath, [], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    shell: false,
   });
 
-  return candidates[0] || null;
+  child.on('error', (error) => {
+    fail(`Installed app could not be launched: ${error.message}`);
+  });
+
+  child.unref();
 }
 
 if (process.platform !== 'win32') {
-  console.error('Desktop install script is currently supported on Windows only.');
-  process.exit(1);
+  fail('Desktop install script is currently supported on Windows only.');
 }
 
-if (!fs.existsSync(outDir)) {
-  console.error(`Build output folder not found: ${outDir}`);
-  console.error('Run the desktop build first.');
-  process.exit(1);
+ensureWindowsEnv('LOCALAPPDATA', localAppData);
+ensureWindowsEnv('APPDATA', appData);
+ensureWindowsEnv('USERPROFILE', userProfile);
+
+if (!fs.existsSync(winUnpackedDir)) {
+  fail(`Build output folder not found: ${winUnpackedDir}\nRun the desktop build first.`);
 }
 
-const best = pickBestExecutable(walk(outDir));
-
-if (!best) {
-  console.error(`No packaged .exe artifact found under: ${outDir}`);
-  console.error('The win-unpacked executable is intentionally ignored to prevent build-output file locks.');
-  console.error('Run the desktop build first.');
-  process.exit(1);
+const sourceExe = path.join(winUnpackedDir, appExeName);
+if (!fs.existsSync(sourceExe)) {
+  fail(`Built desktop executable not found: ${sourceExe}`);
 }
 
-console.log(`Launching desktop artifact: ${best.path}`);
+const installRoot = path.join(localAppData, 'Programs', 'SparQPlug');
+const installExe = path.join(installRoot, appExeName);
+const desktopShortcut = path.join(userProfile, 'Desktop', 'SparQPlug.lnk');
+const startMenuShortcut = path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'SparQPlug.lnk');
 
-const child = spawn(best.path, [], {
-  detached: true,
-  stdio: 'ignore',
-  shell: false,
-});
+stopRunningInstalledApp(installExe);
+copyDirectory(winUnpackedDir, installRoot);
+createShortcut(desktopShortcut, installExe, installRoot);
+createShortcut(startMenuShortcut, installExe, installRoot);
+launchInstalledApp(installExe);
 
-child.on('error', (err) => {
-  console.error('Failed to launch desktop artifact:', err.message);
-  process.exit(1);
-});
-
-child.unref();
+console.log(`Installed SparQPlug to: ${installRoot}`);
+console.log(`Desktop shortcut: ${desktopShortcut}`);
+console.log(`Start menu shortcut: ${startMenuShortcut}`);
 process.exit(0);

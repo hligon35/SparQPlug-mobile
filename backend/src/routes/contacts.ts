@@ -6,7 +6,7 @@ import { createDb } from '../db';
 import { contacts } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { ContactSchema } from '@sparqplug/types';
-import { generateId, buildPagination } from '../lib/utils';
+import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
 
 export const contactsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -21,7 +21,7 @@ contactsRouter.get(
     'query',
     z.object({
       page: z.coerce.number().default(1),
-      limit: z.coerce.number().max(100).default(25),
+      limit: z.coerce.number().max(200).default(25),
       search: z.string().optional(),
       status: z.enum(['active', 'inactive', 'lead', 'prospect', 'customer']).optional(),
       companyId: z.string().optional(),
@@ -60,11 +60,7 @@ contactsRouter.get(
 
     const total = countResult[0]?.count ?? 0;
 
-    return c.json({
-      success: true,
-      data: rows,
-      meta: buildPagination(page, limit, total),
-    });
+    return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, total) });
   },
 );
 

@@ -6,7 +6,7 @@ import { createDb } from '../db';
 import { opportunities } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { OpportunitySchema } from '@sparqplug/types';
-import { generateId, buildPagination } from '../lib/utils';
+import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
 
 export const opportunitiesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -49,8 +49,7 @@ opportunitiesRouter.get(
 
     return c.json({
       success: true,
-      data: rows,
-      meta: buildPagination(page, limit, countResult[0]?.count ?? 0),
+      data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0),
     });
   },
 );

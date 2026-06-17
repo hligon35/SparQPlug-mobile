@@ -12,11 +12,14 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, title, description, children, className }: DialogProps) {
+  const contentAccessibilityProps = description ? {} : { 'aria-describedby': undefined as string | undefined };
+
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <RadixDialog.Content
+          {...contentAccessibilityProps}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
             'w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl',

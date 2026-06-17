@@ -41,7 +41,7 @@
     "deploy:web:cloudflare": "pnpm --filter @sparqplug/web deploy:cloudflare",
     "deploy:prod": "pnpm deploy:backend && pnpm db:migrate:remote && pnpm deploy:web:cloudflare",
 
-    "bootstrap": "node -e \"fetch('http://localhost:8787/api/bootstrap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({secret:process.env.BOOTSTRAP_SECRET})}).then(r=>r.json()).then(console.log).catch(console.error)\"",
+    "bootstrap": "node scripts/bootstrap-local.cjs",
 
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",

@@ -29,8 +29,8 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Contacts', href: '/crm/contacts', icon: Users, group: 'CRM' },
   { label: 'Companies', href: '/crm/companies', icon: Building2, group: 'CRM' },
+  { label: 'Contacts', href: '/crm/contacts', icon: Users, group: 'CRM' },
   { label: 'Opportunities', href: '/crm/opportunities', icon: TrendingUp, group: 'CRM' },
   { label: 'Activities', href: '/crm/activities', icon: Activity, group: 'CRM' },
   { label: 'Password Locker', href: '/crm/password-lockers', icon: KeyRound, group: 'CRM' },
@@ -59,6 +59,7 @@ export function Sidebar() {
   const location = useLocation();
   const collapsed = sidebarCollapsed || sidebarIconOnly;
   const groups = groupNavItems(NAV_ITEMS);
+  const brandAsset = `${import.meta.env.BASE_URL}${collapsed ? 'sparqplugIcon.png' : 'sparqplugLogo.png'}`;
 
   return (
     <aside
@@ -71,7 +72,7 @@ export function Sidebar() {
       <div className="flex h-14 items-center justify-between px-3 border-b border-sidebar-border">
         <div className="flex items-center min-w-0">
           <img
-            src={collapsed ? '/sparqplugIcon.png' : '/sparqplugLogo.png'}
+            src={brandAsset}
             alt="SparQPlug"
             className={cn(
               'block object-contain',

@@ -23,6 +23,7 @@ apps/desktop/dist/
 # Cloudflare
 .wrangler/
 wrangler.toml.local
+backend/.dev.vars
 
 # Logs
 *.log

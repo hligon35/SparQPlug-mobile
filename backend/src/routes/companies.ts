@@ -6,7 +6,7 @@ import { createDb } from '../db';
 import { companies } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
 import { CompanySchema } from '@sparqplug/types';
-import { generateId, buildPagination } from '../lib/utils';
+import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
 
 export const companiesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -18,7 +18,7 @@ companiesRouter.get(
     'query',
     z.object({
       page: z.coerce.number().default(1),
-      limit: z.coerce.number().max(100).default(25),
+      limit: z.coerce.number().max(200).default(25),
       search: z.string().optional(),
       status: z.enum(['active', 'inactive', 'prospect', 'customer', 'churned']).optional(),
     }),
@@ -46,8 +46,7 @@ companiesRouter.get(
 
     return c.json({
       success: true,
-      data: rows,
-      meta: buildPagination(page, limit, countResult[0]?.count ?? 0),
+      data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0),
     });
   },
 );

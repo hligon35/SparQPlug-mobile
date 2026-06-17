@@ -7,7 +7,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -565,6 +565,69 @@ export const stripeSubscriptions = sqliteTable(
     statusIdx: index('stripe_subs_status_idx').on(t.status),
   }),
 );
+
+export const contactsRelations = relations(contacts, ({ one }) => ({
+  company: one(companies, {
+    fields: [contacts.companyId],
+    references: [companies.id],
+  }),
+  owner: one(users, {
+    fields: [contacts.ownerId],
+    references: [users.id],
+  }),
+}));
+
+export const companiesRelations = relations(companies, ({ one, many }) => ({
+  owner: one(users, {
+    fields: [companies.ownerId],
+    references: [users.id],
+  }),
+  contacts: many(contacts),
+  opportunities: many(opportunities),
+  stripeCustomers: many(stripeCustomers),
+}));
+
+export const opportunitiesRelations = relations(opportunities, ({ one }) => ({
+  contact: one(contacts, {
+    fields: [opportunities.contactId],
+    references: [contacts.id],
+  }),
+  company: one(companies, {
+    fields: [opportunities.companyId],
+    references: [companies.id],
+  }),
+  owner: one(users, {
+    fields: [opportunities.ownerId],
+    references: [users.id],
+  }),
+}));
+
+export const stripeCustomersRelations = relations(stripeCustomers, ({ one, many }) => ({
+  contact: one(contacts, {
+    fields: [stripeCustomers.contactId],
+    references: [contacts.id],
+  }),
+  company: one(companies, {
+    fields: [stripeCustomers.companyId],
+    references: [companies.id],
+  }),
+  invoices: many(stripeInvoices),
+  subscriptions: many(stripeSubscriptions),
+}));
+
+export const stripeInvoicesRelations = relations(stripeInvoices, ({ one }) => ({
+  customer: one(stripeCustomers, {
+    fields: [stripeInvoices.customerId],
+    references: [stripeCustomers.id],
+  }),
+}));
+
+export const stripeSubscriptionsRelations = relations(stripeSubscriptions, ({ one }) => ({
+  customer: one(stripeCustomers, {
+    fields: [stripeSubscriptions.customerId],
+    references: [stripeCustomers.id],
+  }),
+}));
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
