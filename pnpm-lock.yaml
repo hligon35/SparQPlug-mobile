@@ -140,6 +140,9 @@ importers:
       react-native-screens:
         specifier: 3.31.1
         version: 3.31.1(react-native@0.74.5(@babel/core@7.29.7)(@babel/preset-env@7.29.7(@babel/core@7.29.7))(@types/react@18.2.79)(react@18.2.0))(react@18.2.0)
+      whatwg-fetch:
+        specifier: ^3.6.20
+        version: 3.6.20
       zustand:
         specifier: ^5.0.0
         version: 5.0.14(@types/react@18.2.79)(react@18.2.0)(use-sync-external-store@1.6.0(react@18.2.0))
