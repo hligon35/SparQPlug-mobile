@@ -6,13 +6,12 @@ const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Ensure Metro in EAS can resolve hoisted/symlinked workspace dependencies.
+// SDK 51 still needs the workspace folders listed explicitly in a monorepo,
+// but Expo's resolver should otherwise stay in control.
 config.watchFolders = [workspaceRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules')
 ];
-config.resolver.unstable_enableSymlinks = true;
-config.resolver.disableHierarchicalLookup = true;
 
 module.exports = config;

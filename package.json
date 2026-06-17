@@ -59,6 +59,18 @@
       "react": "18.2.0",
       "react-dom": "18.2.0",
       "lightningcss": "^1.27.0"
+    },
+    "packageExtensions": {
+      "@expo/metro-runtime@*": {
+        "dependencies": {
+          "whatwg-fetch": "^3.6.20"
+        }
+      },
+      "expo-splash-screen@*": {
+        "dependencies": {
+          "expo-modules-core": "1.12.26"
+        }
+      }
     }
   },
   "engines": {
