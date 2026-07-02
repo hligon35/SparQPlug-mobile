@@ -1,14 +1,25 @@
 import { Search, Bell, Sun, Moon, LogOut, Menu } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { signOut } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { api } from '@/lib/api';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUIStore } from '@/stores/ui-store';
 import { useTheme } from '@/providers/theme-provider';
+import type { ApiResponse, Notification } from '@sparqplug/types';
 
 export function Topbar() {
+  const navigate = useNavigate();
   const { user, signOut: clearAuth } = useAuthStore();
   const { setCommandPaletteOpen, setMobileSidebarOpen } = useUIStore();
   const { theme, setTheme } = useTheme();
+  const { data } = useQuery({
+    queryKey: ['notifications', 'topbar'],
+    queryFn: () => api.get<ApiResponse<Notification[]>>('/notifications'),
+  });
+
+  const unreadCount = (data?.data ?? []).filter((item) => !item.isRead).length;
 
   async function handleSignOut() {
     await signOut(auth);
@@ -51,11 +62,12 @@ export function Topbar() {
 
         <button
           type="button"
+          onClick={() => navigate('/notifications')}
           className="relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4" />
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+          {unreadCount > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />}
         </button>
 
         <button

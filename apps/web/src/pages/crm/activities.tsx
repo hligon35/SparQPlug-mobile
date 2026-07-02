@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Phone, Mail, Calendar, FileText, CheckSquare, Activity, Plus } from 'lucide-react';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { formatDateTime, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
+import { normalizeActivityPayload, type ActivityFormValues } from '@/lib/form-utils';
 import type { ApiResponse, PaginatedResponse, Activity as ActivityType, ActivityType as AT, Company, Contact } from '@sparqplug/types';
 
 const ACTIVITY_ICONS: Record<AT, React.ElementType> = {
@@ -29,11 +30,20 @@ const ACTIVITY_COLORS: Record<AT, string> = {
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const ACTIVITY_TYPES: AT[] = ['call', 'email', 'meeting', 'note', 'task', 'demo', 'follow_up'];
+const initialForm: ActivityFormValues = { type: 'call', subject: '', description: '', scheduledAt: '', contactId: '', companyId: '' };
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export function ActivitiesPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ type: 'call' as AT, description: '', scheduledAt: '', contactId: '', companyId: '' });
+  const [form, setForm] = useState<ActivityFormValues>(initialForm);
   const { data, isLoading } = useQuery({
     queryKey: ['activities', { page: 1 }],
     queryFn: () =>
@@ -41,14 +51,19 @@ export function ActivitiesPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form) => api.post('/activities', data),
+    mutationFn: (data: ActivityFormValues) => api.post('/activities', normalizeActivityPayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['activities'] });
       toast({ title: 'Activity logged', variant: 'success' });
       setShowCreate(false);
-      setForm({ type: 'call', description: '', scheduledAt: '', contactId: '', companyId: '' });
+      setForm(initialForm);
     },
-    onError: () => toast({ title: 'Failed to log activity', variant: 'destructive' }),
+    onError: (error) =>
+      toast({
+        title: 'Failed to log activity',
+        description: getErrorMessage(error, 'Review the activity details and try again.'),
+        variant: 'destructive',
+      }),
   });
 
   const { data: companiesData } = useQuery({
@@ -126,30 +141,34 @@ export function ActivitiesPage() {
       )}
 
       <Dialog open={showCreate} onOpenChange={setShowCreate} title="Log Activity">
-        <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }} className="space-y-3">
+        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Type</label>
-              <select className={inputClass} value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as AT }))}>
+              <select aria-label="Activity type" className={inputClass} value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as AT, subject: f.subject || e.target.value.replace('_', ' ') }))}>
                 {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Scheduled at</label>
-              <input type="datetime-local" className={inputClass} value={form.scheduledAt} onChange={(e) => setForm((f) => ({ ...f, scheduledAt: e.target.value }))} />
+              <input type="datetime-local" title="Scheduled activity time" className={inputClass} value={form.scheduledAt} onChange={(e) => setForm((f) => ({ ...f, scheduledAt: e.target.value }))} />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Subject *</label>
+            <input required className={inputClass} value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} placeholder="Follow-up call" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Contact</label>
-              <select className={inputClass} value={form.contactId} onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))}>
+              <select aria-label="Activity contact" className={inputClass} value={form.contactId} onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))}>
                 <option value="">— None —</option>
                 {contactsList.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Company</label>
-              <select className={inputClass} value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}>
+              <select aria-label="Activity company" className={inputClass} value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}>
                 <option value="">— None —</option>
                 {companiesList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>

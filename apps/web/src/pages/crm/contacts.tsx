@@ -9,7 +9,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { PageShell } from '@/components/layout/page-shell';
 import { ResponsiveDataView } from '@/components/data/responsive-data-view';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { normalizeContactPayload, type ContactFormValues } from '@/lib/form-utils';
+import { formatPhoneInput, normalizeContactPayload, type ContactFormValues } from '@/lib/form-utils';
 import type { ApiResponse, PaginatedResponse, Contact, Company, ContactInput } from '@sparqplug/types';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -399,7 +399,7 @@ export function ContactsPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Phone</label>
-              <input className={inputClass} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+1 555 000 0000" />
+              <input className={inputClass} inputMode="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formatPhoneInput(e.target.value) }))} placeholder="+1 (555) 000-0000" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Status</label>

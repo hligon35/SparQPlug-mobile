@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { normalizeUrlField, prefillUrlField } from '@/lib/form-utils';
 import { formatRelative, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
@@ -134,7 +135,7 @@ export function PasswordLockersPage() {
         service: payload.service,
         username: payload.username.trim() || null,
         accountEmail: payload.accountEmail.trim() || null,
-        loginUrl: payload.loginUrl.trim() || null,
+        loginUrl: normalizeUrlField(payload.loginUrl) ?? null,
         password: payload.password,
         notes: payload.notes.trim() || null,
         contactId: payload.contactId || null,
@@ -158,7 +159,7 @@ export function PasswordLockersPage() {
         service: payload.service,
         username: payload.username.trim() || null,
         accountEmail: payload.accountEmail.trim() || null,
-        loginUrl: payload.loginUrl.trim() || null,
+        loginUrl: normalizeUrlField(payload.loginUrl) ?? null,
         notes: payload.notes.trim() || null,
         contactId: payload.contactId || null,
         companyId: payload.companyId || null,
@@ -206,7 +207,7 @@ export function PasswordLockersPage() {
       service: locker.service,
       username: locker.username ?? '',
       accountEmail: locker.accountEmail ?? '',
-      loginUrl: locker.loginUrl ?? '',
+      loginUrl: locker.loginUrl ?? 'https://',
       password: '',
       notes: locker.notes ?? '',
       contactId: locker.contactId ?? '',
@@ -539,6 +540,7 @@ export function PasswordLockersPage() {
               type="url"
               className={inputClass}
               value={form.loginUrl}
+              onFocus={() => setForm((current) => ({ ...current, loginUrl: prefillUrlField(current.loginUrl) }))}
               onChange={(e) => setForm((current) => ({ ...current, loginUrl: e.target.value }))}
               placeholder="https://accounts.google.com"
             />

@@ -27,6 +27,7 @@ import { AnalyticsPage } from '@/pages/analytics';
 import { BillingCustomersPage } from '@/pages/billing/customers';
 import { BillingInvoicesPage } from '@/pages/billing/invoices';
 import { BillingSubscriptionsPage } from '@/pages/billing/subscriptions';
+import { NotificationsPage } from '@/pages/notifications';
 import { DocumentsPage } from '@/pages/documents';
 import { SettingsPage } from '@/pages/settings';
 import { NetworkOpsPage } from '@/pages/network-ops/index';
@@ -124,6 +125,9 @@ export default function App() {
                 <Route path="/billing/customers" element={<BillingCustomersPage />} />
                 <Route path="/billing/invoices" element={<BillingInvoicesPage />} />
                 <Route path="/billing/subscriptions" element={<BillingSubscriptionsPage />} />
+
+                {/* Notifications */}
+                <Route path="/notifications" element={<NotificationsPage />} />
 
                 {/* Documents */}
                 <Route path="/documents" element={<DocumentsPage />} />

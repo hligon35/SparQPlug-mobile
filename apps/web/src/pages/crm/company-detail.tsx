@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Globe, Users, MapPin, Server, Plus, Trash2, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/lib/form-utils';
 import { formatRelative, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import type { ApiResponse, Company } from '@sparqplug/types';
@@ -44,7 +45,7 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [selectedServiceId, setSelectedServiceId] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState('1');
   const [billedAmount, setBilledAmount] = useState('');
   const [showExpenseLog, setShowExpenseLog] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ serviceId: '', period: new Date().toISOString().slice(0, 7), actualCostCents: '', invoiceRef: '', pct: '100', billedAmountCents: '' });
@@ -68,14 +69,14 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
   const addMutation = useMutation({
     mutationFn: () => api.post(`/services/clients/${companyId}`, {
       serviceId: selectedServiceId,
-      quantity,
+      quantity: Number.parseInt(quantity || '1', 10) || 1,
       billedAmountCents: Math.round(parseFloat(billedAmount || '0') * 100),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['company-services', companyId] });
       setShowAdd(false);
       setSelectedServiceId('');
-      setQuantity(1);
+      setQuantity('1');
       setBilledAmount('');
       toast({ title: 'Service assigned', variant: 'success' });
     },
@@ -165,6 +166,7 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
             <div className="space-y-1 sm:col-span-2">
               <label className="text-xs text-muted-foreground">Service</label>
               <select
+                aria-label="Assign service"
                 value={selectedServiceId}
                 onChange={(e) => setSelectedServiceId(e.target.value)}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -177,12 +179,12 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Quantity</label>
-              <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+              <input type="text" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(sanitizeIntegerInput(e.target.value))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
             <div className="space-y-1 sm:col-span-2">
               <label className="text-xs text-muted-foreground">Amount billed to client ($/mo)</label>
-              <input type="number" min="0" step="0.01" placeholder="0.00" value={billedAmount} onChange={(e) => setBilledAmount(e.target.value)}
+              <input type="text" inputMode="decimal" placeholder="0.00" value={billedAmount} onChange={(e) => setBilledAmount(sanitizeDecimalInput(e.target.value))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
           </div>
@@ -207,6 +209,7 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
             <div className="space-y-1 sm:col-span-2">
               <label className="text-xs text-muted-foreground">Service</label>
               <select
+                aria-label="Usage expense service"
                 value={expenseForm.serviceId}
                 onChange={(e) => setExpenseForm((f) => ({ ...f, serviceId: e.target.value }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -217,27 +220,27 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Billing Period (YYYY-MM)</label>
-              <input type="month" value={expenseForm.period} onChange={(e) => setExpenseForm((f) => ({ ...f, period: e.target.value }))}
+              <input type="text" inputMode="numeric" title="Billing period" placeholder="YYYY-MM" value={expenseForm.period} onChange={(e) => setExpenseForm((f) => ({ ...f, period: e.target.value }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Actual Bill ($)</label>
-              <input type="number" min="0" step="0.01" placeholder="0.00" value={expenseForm.actualCostCents} onChange={(e) => setExpenseForm((f) => ({ ...f, actualCostCents: e.target.value }))}
+              <input type="text" inputMode="decimal" placeholder="0.00" value={expenseForm.actualCostCents} onChange={(e) => setExpenseForm((f) => ({ ...f, actualCostCents: sanitizeDecimalInput(e.target.value) }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">% Allocated to this client</label>
-              <input type="number" min="0" max="100" step="1" value={expenseForm.pct} onChange={(e) => setExpenseForm((f) => ({ ...f, pct: e.target.value }))}
+              <input type="text" inputMode="numeric" value={expenseForm.pct} onChange={(e) => setExpenseForm((f) => ({ ...f, pct: sanitizeIntegerInput(e.target.value) }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Amount billed to client ($)</label>
-              <input type="number" min="0" step="0.01" placeholder="0.00" value={expenseForm.billedAmountCents} onChange={(e) => setExpenseForm((f) => ({ ...f, billedAmountCents: e.target.value }))}
+              <input type="text" inputMode="decimal" placeholder="0.00" value={expenseForm.billedAmountCents} onChange={(e) => setExpenseForm((f) => ({ ...f, billedAmountCents: sanitizeDecimalInput(e.target.value) }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Invoice Ref (optional)</label>
-              <input type="text" value={expenseForm.invoiceRef} onChange={(e) => setExpenseForm((f) => ({ ...f, invoiceRef: e.target.value }))}
+              <input type="text" title="Invoice reference" placeholder="INV-1001" value={expenseForm.invoiceRef} onChange={(e) => setExpenseForm((f) => ({ ...f, invoiceRef: e.target.value }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </div>
           </div>
@@ -292,6 +295,8 @@ function CompanyServicesTab({ companyId }: { companyId: string }) {
                   </div>
                 </div>
                 <button
+                  type="button"
+                  title={`Remove ${row.service.name}`}
                   onClick={() => removeMutation.mutate(row.assignment.id)}
                   className="p-1.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors shrink-0"
                 >

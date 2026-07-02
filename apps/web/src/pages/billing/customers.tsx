@@ -1,20 +1,30 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, CreditCard } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Search, Plus, CreditCard, RefreshCw } from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
 import { formatRelative } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
+import { normalizeBillingCustomerPayload, type BillingCustomerFormValues } from '@/lib/form-utils';
 import type { ApiResponse, PaginatedResponse, StripeCustomer } from '@sparqplug/types';
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const initialForm: BillingCustomerFormValues = { name: '', email: '' };
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export function BillingCustomersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '' });
+  const [form, setForm] = useState<BillingCustomerFormValues>(initialForm);
   const LIMIT = 20;
 
   const { data, isLoading } = useQuery({
@@ -32,14 +42,39 @@ export function BillingCustomersPage() {
   const totalPages = Math.ceil(total / LIMIT);
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form) => api.post('/billing/customers', data),
+    mutationFn: (data: BillingCustomerFormValues) => api.post('/billing/customers', normalizeBillingCustomerPayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
       toast({ title: 'Customer created', variant: 'success' });
       setShowCreate(false);
-      setForm({ name: '', email: '' });
+      setForm(initialForm);
     },
-    onError: () => toast({ title: 'Failed to create customer', variant: 'destructive' }),
+    onError: (error) =>
+      toast({
+        title: 'Failed to create customer',
+        description: getErrorMessage(error, 'Review the customer details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.post<ApiResponse<{ synced: { customers: number; invoices: number; subscriptions: number } }>>('/billing/sync', { resources: ['customers'] }),
+    onSuccess: (response) => {
+      const syncedCustomers = response.data?.synced.customers ?? 0;
+      queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-customers-list'] });
+      toast({
+        title: 'Stripe sync complete',
+        description: `Imported ${syncedCustomers} customers from Stripe.`,
+        variant: 'success',
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Stripe sync failed',
+        description: getErrorMessage(error, 'The backend could not read Stripe customers.'),
+        variant: 'destructive',
+      }),
   });
 
   return (
@@ -49,10 +84,21 @@ export function BillingCustomersPage() {
           <h1 className="text-xl font-semibold text-foreground">Billing Customers</h1>
           <p className="text-sm text-muted-foreground">{total} customers</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-          <Plus className="h-4 w-4" />
-          New Customer
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncMutation.isPending ? 'Syncing…' : 'Sync Stripe'}
+          </button>
+          <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Plus className="h-4 w-4" />
+            New Customer
+          </button>
+        </div>
       </div>
 
       <div className="relative">
@@ -85,7 +131,7 @@ export function BillingCustomersPage() {
                 </tr>
               ))
             ) : customers.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-12 text-center text-muted-foreground">No customers found</td></tr>
+              <tr><td colSpan={3} className="px-4 py-12 text-center text-muted-foreground">No customers found. Use Sync Stripe to import existing Stripe customers.</td></tr>
             ) : (
               customers.map((c) => (
                 <tr key={c.id} className="hover:bg-muted/30 transition-colors">
@@ -116,7 +162,7 @@ export function BillingCustomersPage() {
       </div>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Billing Customer">
-        <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }} className="space-y-3">
+        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name</label>
             <input className={inputClass} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Acme Inc." />

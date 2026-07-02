@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FileText } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Plus, FileText, RefreshCw } from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
+import { normalizeBillingInvoicePayload, sanitizeDecimalInput, type BillingInvoiceFormValues } from '@/lib/form-utils';
 import type { ApiResponse, PaginatedResponse, StripeInvoice, InvoiceStatus, StripeCustomer } from '@sparqplug/types';
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -16,12 +17,29 @@ const STATUS_COLORS: Record<InvoiceStatus, string> = {
   void: 'bg-muted text-muted-foreground line-through',
   uncollectible: 'bg-destructive/15 text-destructive',
 };
+const initialForm: BillingInvoiceFormValues = {
+  customerId: '',
+  description: '',
+  amount: '',
+  currency: 'usd',
+  dueDate: '',
+  notes: '',
+  autoSend: false,
+};
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export function BillingInvoicesPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ customerEmail: '', amountDue: '', currency: 'usd', dueDate: '' });
+  const [form, setForm] = useState<BillingInvoiceFormValues>(initialForm);
   const LIMIT = 20;
 
   const { data, isLoading } = useQuery({
@@ -35,17 +53,41 @@ export function BillingInvoicesPage() {
   const totalPages = Math.ceil(total / LIMIT);
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form) => api.post('/billing/invoices', {
-      ...data,
-      amountDue: data.amountDue ? Math.round(parseFloat(data.amountDue) * 100) : 0,
-    }),
+    mutationFn: (data: BillingInvoiceFormValues) => api.post('/billing/invoices', normalizeBillingInvoicePayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
       toast({ title: 'Invoice created', variant: 'success' });
       setShowCreate(false);
-      setForm({ customerEmail: '', amountDue: '', currency: 'usd', dueDate: '' });
+      setForm(initialForm);
     },
-    onError: () => toast({ title: 'Failed to create invoice', variant: 'destructive' }),
+    onError: (error) =>
+      toast({
+        title: 'Failed to create invoice',
+        description: getErrorMessage(error, 'Review the invoice details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => api.post<ApiResponse<{ synced: { customers: number; invoices: number; subscriptions: number } }>>('/billing/sync', { resources: ['customers', 'invoices'] }),
+    onSuccess: (response) => {
+      const syncedInvoices = response.data?.synced.invoices ?? 0;
+      const syncedCustomers = response.data?.synced.customers ?? 0;
+      queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-customers-list'] });
+      toast({
+        title: 'Stripe sync complete',
+        description: `Imported ${syncedInvoices} invoices and ${syncedCustomers} customers from Stripe.`,
+        variant: 'success',
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Stripe sync failed',
+        description: getErrorMessage(error, 'The backend could not read Stripe invoices.'),
+        variant: 'destructive',
+      }),
   });
 
   const { data: customersData } = useQuery({
@@ -62,10 +104,21 @@ export function BillingInvoicesPage() {
           <h1 className="text-xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-muted-foreground">{total} invoices</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-          <Plus className="h-4 w-4" />
-          New Invoice
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncMutation.isPending ? 'Syncing…' : 'Sync Stripe'}
+          </button>
+          <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Plus className="h-4 w-4" />
+            New Invoice
+          </button>
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -89,7 +142,7 @@ export function BillingInvoicesPage() {
                 </tr>
               ))
             ) : invoices.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No invoices found</td></tr>
+              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No invoices found. Use Sync Stripe to import existing Stripe invoices.</td></tr>
             ) : (
               invoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-muted/30 transition-colors">
@@ -130,34 +183,49 @@ export function BillingInvoicesPage() {
       </div>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Invoice">
-        <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }} className="space-y-3">
+        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Customer *</label>
-            {customersList.length > 0 ? (
-              <select required className={inputClass} value={form.customerEmail} onChange={(e) => setForm((f) => ({ ...f, customerEmail: e.target.value }))}>
-                <option value="">— Select customer —</option>
-                {customersList.map((c) => <option key={c.id} value={c.email}>{c.name} ({c.email})</option>)}
-              </select>
-            ) : (
-              <input required type="email" className={inputClass} value={form.customerEmail} onChange={(e) => setForm((f) => ({ ...f, customerEmail: e.target.value }))} placeholder="billing@acme.com" />
-            )}
+            <select required aria-label="Invoice customer" className={inputClass} value={form.customerId} onChange={(e) => setForm((f) => ({ ...f, customerId: e.target.value }))}>
+              <option value="">— Select customer —</option>
+              {customersList.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.email})</option>)}
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Amount ($) *</label>
-              <input required type="number" min="0" step="0.01" className={inputClass} value={form.amountDue} onChange={(e) => setForm((f) => ({ ...f, amountDue: e.target.value }))} placeholder="0.00" />
+              <label className="text-xs font-medium text-muted-foreground">Line item *</label>
+              <input required className={inputClass} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="Monthly retainer" />
             </div>
             <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Amount ($) *</label>
+              <input required type="text" inputMode="decimal" className={inputClass} value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: sanitizeDecimalInput(e.target.value) }))} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Currency</label>
-              <select className={inputClass} value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
+              <select aria-label="Invoice currency" className={inputClass} value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}>
                 {['usd', 'eur', 'gbp', 'cad', 'aud'].map((c) => <option key={c} value={c}>{c.toUpperCase()}</option>)}
               </select>
             </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Due date</label>
+              <input type="date" title="Invoice due date" className={inputClass} value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} />
+            </div>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Due date</label>
-            <input type="date" className={inputClass} value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} />
+            <label className="text-xs font-medium text-muted-foreground">Notes</label>
+            <textarea
+              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Optional note shown internally"
+            />
           </div>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input type="checkbox" checked={form.autoSend} onChange={(e) => setForm((f) => ({ ...f, autoSend: e.target.checked }))} className="h-4 w-4 rounded border-border" />
+            Send invoice automatically after creation
+          </label>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
             <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">

@@ -7,6 +7,7 @@ import { formatDate, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/stores/auth-store';
+import { normalizeUrlField, prefillUrlField, sanitizeDecimalInput, sanitizeIntegerInput } from '@/lib/form-utils';
 import type { ApiResponse, Organization, TeamMember, ApiKey } from '@sparqplug/types';
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -121,7 +122,7 @@ function TeamSection() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Role</label>
-            <select className={inputClass} value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value }))}>
+            <select aria-label="Invite member role" className={inputClass} value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value }))}>
               <option value="member">Member</option>
               <option value="admin">Admin</option>
               <option value="viewer">Viewer</option>
@@ -287,7 +288,7 @@ function formatCents(cents: number): string {
 
 const EMPTY_SERVICE = {
   name: '', provider: '', category: 'other' as ServiceCategory,
-  billingType: 'fixed' as const, unitCostCents: 0, defaultMarkupPct: 0,
+  billingType: 'fixed' as const, unitCostCents: '', defaultMarkupPct: '',
   billingCycle: 'monthly' as const, url: '', notes: '', isActive: true,
 };
 
@@ -296,8 +297,8 @@ type ServiceForm = {
   provider: string;
   category: ServiceCategory;
   billingType: 'fixed' | 'per_seat' | 'usage';
-  unitCostCents: number;
-  defaultMarkupPct: number;
+  unitCostCents: string;
+  defaultMarkupPct: string;
   billingCycle: 'monthly' | 'annual' | 'one_time';
   url: string;
   notes: string;
@@ -320,8 +321,9 @@ function ServicesSection() {
   const createMutation = useMutation({
     mutationFn: (body: typeof form) => api.post('/services', {
       ...body,
-      unitCostCents: Math.round(Number(body.unitCostCents) * 100),
-      defaultMarkupPct: Number(body.defaultMarkupPct),
+      unitCostCents: Math.round(Number(body.unitCostCents || '0') * 100),
+      defaultMarkupPct: Number(body.defaultMarkupPct || '0'),
+      url: normalizeUrlField(body.url),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['services-catalog'] });
@@ -336,8 +338,9 @@ function ServicesSection() {
     mutationFn: ({ id, body }: { id: string; body: typeof form }) =>
       api.put(`/services/${id}`, {
         ...body,
-        unitCostCents: Math.round(Number(body.unitCostCents) * 100),
-        defaultMarkupPct: Number(body.defaultMarkupPct),
+        unitCostCents: Math.round(Number(body.unitCostCents || '0') * 100),
+        defaultMarkupPct: Number(body.defaultMarkupPct || '0'),
+        url: normalizeUrlField(body.url),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['services-catalog'] });
@@ -359,8 +362,8 @@ function ServicesSection() {
     setEditing(s);
     setForm({
       name: s.name, provider: s.provider, category: s.category,
-      billingType: s.billingType, unitCostCents: s.unitCostCents / 100 as unknown as number,
-      defaultMarkupPct: s.defaultMarkupPct, billingCycle: s.billingCycle,
+      billingType: s.billingType, unitCostCents: (s.unitCostCents / 100).toFixed(2),
+      defaultMarkupPct: String(s.defaultMarkupPct), billingCycle: s.billingCycle,
       url: s.url ?? '', notes: '', isActive: s.isActive,
     });
   }
@@ -395,8 +398,10 @@ function ServicesSection() {
                 <label className="text-xs font-medium text-muted-foreground capitalize">{field}</label>
                 <input
                   type="text"
+                  title={field}
                   value={form[field]}
                   onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
+                  placeholder={field === 'name' ? 'Cloudflare Workers' : 'Cloudflare'}
                   className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
@@ -404,6 +409,7 @@ function ServicesSection() {
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Category</label>
               <select
+                aria-label="Service category"
                 value={form.category}
                 onChange={(e) => setForm((f) => ({ ...f, category: e.target.value as ServiceCategory }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -414,6 +420,7 @@ function ServicesSection() {
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Billing Type</label>
               <select
+                aria-label="Service billing type"
                 value={form.billingType}
                 onChange={(e) => setForm((f) => ({ ...f, billingType: e.target.value as typeof form.billingType }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -427,9 +434,11 @@ function ServicesSection() {
                   Unit Cost ($){form.billingType === 'per_seat' ? ' / seat' : ''}
                 </label>
                 <input
-                  type="number" min="0" step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={form.unitCostCents}
-                  onChange={(e) => setForm((f) => ({ ...f, unitCostCents: parseFloat(e.target.value) || 0 }))}
+                  onChange={(e) => setForm((f) => ({ ...f, unitCostCents: sanitizeDecimalInput(e.target.value) }))}
+                  placeholder="0.00"
                   className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </div>
@@ -437,15 +446,18 @@ function ServicesSection() {
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Default Markup %</label>
               <input
-                type="number" min="0" step="1"
+                type="text"
+                inputMode="numeric"
                 value={form.defaultMarkupPct}
-                onChange={(e) => setForm((f) => ({ ...f, defaultMarkupPct: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) => setForm((f) => ({ ...f, defaultMarkupPct: sanitizeIntegerInput(e.target.value) }))}
+                placeholder="0"
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Billing Cycle</label>
               <select
+                aria-label="Service billing cycle"
                 value={form.billingCycle}
                 onChange={(e) => setForm((f) => ({ ...f, billingCycle: e.target.value as typeof form.billingCycle }))}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -458,6 +470,7 @@ function ServicesSection() {
               <input
                 type="url"
                 value={form.url}
+                onFocus={() => setForm((f) => ({ ...f, url: prefillUrlField(f.url) }))}
                 onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
                 placeholder="https://console.cloud.google.com"
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -533,14 +546,14 @@ function ServicesSection() {
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {s.url && (
-                  <a href={s.url} target="_blank" rel="noreferrer" className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                  <a href={s.url} target="_blank" rel="noreferrer" title={`Open ${s.name}`} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 )}
-                <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                <button type="button" title={`Edit ${s.name}`} onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={() => deleteMutation.mutate(s.id)} className="p-1.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors">
+                <button type="button" title={`Delete ${s.name}`} onClick={() => deleteMutation.mutate(s.id)} className="p-1.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>

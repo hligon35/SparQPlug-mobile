@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, TrendingUp } from 'lucide-react';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { formatCurrency, formatRelative, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
+import { normalizeOpportunityPayload, sanitizeDecimalInput, sanitizeIntegerInput, type OpportunityFormValues } from '@/lib/form-utils';
 import type { ApiResponse, PaginatedResponse, Opportunity, OpportunityStage, Company, Contact } from '@sparqplug/types';
 
-const STAGES: OpportunityStage[] = ['lead', 'qualified', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
+const STAGES: OpportunityStage[] = ['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
 
 const STAGE_COLORS: Record<OpportunityStage, string> = {
   lead: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
@@ -32,13 +33,22 @@ const STAGE_PROBABILITIES: Record<OpportunityStage, string> = {
 };
 
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const initialForm: OpportunityFormValues = { name: '', stage: 'prospecting', value: '', probability: STAGE_PROBABILITIES['prospecting'], expectedCloseDate: '', companyId: '', contactId: '' };
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 export function OpportunitiesPage() {
   const queryClient = useQueryClient();
   const [stage, setStage] = useState<OpportunityStage | ''>('');
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', stage: 'lead' as OpportunityStage, value: '', probability: STAGE_PROBABILITIES['lead'], closeDate: '', companyId: '', contactId: '' });
+  const [form, setForm] = useState<OpportunityFormValues>(initialForm);
   const LIMIT = 20;
 
   const { data, isLoading } = useQuery({
@@ -56,18 +66,19 @@ export function OpportunitiesPage() {
   const totalPages = Math.ceil(total / LIMIT);
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form) => api.post('/opportunities', {
-      ...data,
-      value: data.value ? parseFloat(data.value) : undefined,
-      probability: data.probability ? parseInt(data.probability) : undefined,
-    }),
+    mutationFn: (data: OpportunityFormValues) => api.post('/opportunities', normalizeOpportunityPayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opportunities'] });
       toast({ title: 'Opportunity created', variant: 'success' });
       setShowCreate(false);
-      setForm({ name: '', stage: 'lead', value: '', probability: STAGE_PROBABILITIES['lead'], closeDate: '', companyId: '', contactId: '' });
+      setForm(initialForm);
     },
-    onError: () => toast({ title: 'Failed to create opportunity', variant: 'destructive' }),
+    onError: (error) =>
+      toast({
+        title: 'Failed to create opportunity',
+        description: getErrorMessage(error, 'Review the opportunity fields and try again.'),
+        variant: 'destructive',
+      }),
   });
 
   const { data: companiesData } = useQuery({
@@ -177,7 +188,7 @@ export function OpportunitiesPage() {
       </div>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Opportunity">
-        <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(form); }} className="space-y-3">
+        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name *</label>
             <input required autoFocus className={inputClass} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Enterprise deal" />
@@ -185,14 +196,14 @@ export function OpportunitiesPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Company</label>
-              <select className={inputClass} value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}>
+              <select aria-label="Opportunity company" className={inputClass} value={form.companyId} onChange={(e) => setForm((f) => ({ ...f, companyId: e.target.value }))}>
                 <option value="">— None —</option>
                 {companiesList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Contact</label>
-              <select className={inputClass} value={form.contactId} onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))}>
+              <select aria-label="Opportunity contact" className={inputClass} value={form.contactId} onChange={(e) => setForm((f) => ({ ...f, contactId: e.target.value }))}>
                 <option value="">— None —</option>
                 {contactsList.map((c) => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
               </select>
@@ -201,8 +212,8 @@ export function OpportunitiesPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Stage</label>
-              <select className={inputClass} value={form.stage} onChange={(e) => {
-                const s = e.target.value as OpportunityStage;
+              <select aria-label="Opportunity stage" className={inputClass} value={form.stage} onChange={(e) => {
+                const s = e.target.value as OpportunityFormValues['stage'];
                 setForm((f) => ({ ...f, stage: s, probability: STAGE_PROBABILITIES[s] }));
               }}>
                 {STAGES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
@@ -210,17 +221,17 @@ export function OpportunitiesPage() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Value ($)</label>
-              <input type="number" min="0" step="0.01" className={inputClass} value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))} placeholder="0.00" />
+              <input type="text" inputMode="decimal" className={inputClass} value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: sanitizeDecimalInput(e.target.value) }))} placeholder="0.00" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Probability (%)</label>
-              <input type="number" min="0" max="100" className={inputClass} value={form.probability} onChange={(e) => setForm((f) => ({ ...f, probability: e.target.value }))} />
+              <input type="text" inputMode="numeric" title="Opportunity probability" className={inputClass} value={form.probability} onChange={(e) => setForm((f) => ({ ...f, probability: sanitizeIntegerInput(e.target.value) }))} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Close date</label>
-              <input type="date" className={inputClass} value={form.closeDate} onChange={(e) => setForm((f) => ({ ...f, closeDate: e.target.value }))} />
+              <input type="date" title="Expected close date" className={inputClass} value={form.expectedCloseDate} onChange={(e) => setForm((f) => ({ ...f, expectedCloseDate: e.target.value }))} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">

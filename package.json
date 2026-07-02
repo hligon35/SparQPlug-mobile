@@ -15,7 +15,6 @@
     "dev:mobile": "pnpm --filter @sparqplug/mobile start",
     "dev:backend": "pnpm --filter @sparqplug/backend dev",
     "dev:all": "turbo run dev --parallel",
-
     "build": "turbo run build",
     "package": "pnpm --filter @sparqplug/desktop run build",
     "dist": "pnpm --filter @sparqplug/desktop run build",
@@ -28,7 +27,6 @@
     "build:mobile:ios:internal": "pnpm --filter @sparqplug/mobile build:ios:internal",
     "build:mobile:ios:testflight": "pnpm --filter @sparqplug/mobile build:ios:testflight",
     "build:backend": "pnpm --filter @sparqplug/backend build",
-
     "submit:android": "pnpm --filter @sparqplug/mobile submit:android",
     "submit:ios": "pnpm --filter @sparqplug/mobile submit:ios",
     "submit:mobile:ios:testflight": "pnpm --filter @sparqplug/mobile submit:ios:testflight",
@@ -40,9 +38,7 @@
     "db:migrate:local": "pnpm --filter @sparqplug/backend run db:migrate:local",
     "deploy:web:cloudflare": "pnpm --filter @sparqplug/web deploy:cloudflare",
     "deploy:prod": "pnpm deploy:backend && pnpm db:migrate:remote && pnpm deploy:web:cloudflare",
-
     "bootstrap": "node scripts/bootstrap-local.cjs",
-
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "verify": "node scripts/verify-runtime-deps.cjs && pnpm run type-check && pnpm --filter @sparqplug/web run lint && pnpm --filter @sparqplug/web run build:deploy && pnpm --filter @sparqplug/desktop run build && node apps/desktop/scripts/verify-desktop-package.cjs",
@@ -50,9 +46,9 @@
     "db:migrate": "pnpm --filter @sparqplug/backend db:migrate"
   },
   "devDependencies": {
-    "turbo": "^2.0.0",
-    "typescript": "^5.5.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.19.43",
+    "turbo": "^2.10.2",
+    "typescript": "^5.9.3"
   },
   "pnpm": {
     "overrides": {

@@ -31,13 +31,17 @@ function runPowerShell(command) {
   });
 }
 
-function stopRunningInstalledApp(executablePath) {
-  const escapedExePath = executablePath.replace(/'/g, "''");
+function waitMs(durationMs) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, durationMs);
+}
+
+function stopRunningInstalledProcesses(installDirectory) {
+  const escapedInstallDir = installDirectory.replace(/'/g, "''");
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
-    `$target = '${escapedExePath}'`,
+    `$targetDir = '${escapedInstallDir}'`,
     'Get-CimInstance Win32_Process | ForEach-Object {',
-    '  if ($_.ExecutablePath -and $_.ExecutablePath.Equals($target, [System.StringComparison]::OrdinalIgnoreCase)) {',
+    '  if ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($targetDir, [System.StringComparison]::OrdinalIgnoreCase)) {',
     '    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue',
     '  }',
     '}',
@@ -46,9 +50,52 @@ function stopRunningInstalledApp(executablePath) {
   runPowerShell(script);
 }
 
+function forceRemoveDirectory(targetDir) {
+  const escapedTargetDir = targetDir.replace(/'/g, "''");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$targetDir = '${escapedTargetDir}'`,
+    'if (Test-Path $targetDir) {',
+    '  Get-ChildItem -LiteralPath $targetDir -Force -Recurse -ErrorAction SilentlyContinue | ForEach-Object {',
+    '    try { $_.Attributes = "Normal" } catch {}',
+    '  }',
+    '  try { (Get-Item -LiteralPath $targetDir -Force).Attributes = "Directory" } catch {}',
+    '  Remove-Item -LiteralPath $targetDir -Force -Recurse -ErrorAction Stop',
+    '}',
+  ].join('; ');
+
+  return runPowerShell(script);
+}
+
+function removeDirectoryWithRetries(targetDir) {
+  if (!fs.existsSync(targetDir)) {
+    return;
+  }
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      return;
+    } catch (error) {
+      lastError = error;
+      forceRemoveDirectory(targetDir);
+
+      if (!fs.existsSync(targetDir)) {
+        return;
+      }
+
+      waitMs(300 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
 function copyDirectory(sourceDir, targetDir) {
   fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-  fs.rmSync(targetDir, { recursive: true, force: true });
+  removeDirectoryWithRetries(targetDir);
   fs.cpSync(sourceDir, targetDir, { recursive: true, force: true });
 }
 
@@ -114,7 +161,7 @@ const installExe = path.join(installRoot, appExeName);
 const desktopShortcut = path.join(userProfile, 'Desktop', 'SparQPlug.lnk');
 const startMenuShortcut = path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'SparQPlug.lnk');
 
-stopRunningInstalledApp(installExe);
+stopRunningInstalledProcesses(installRoot);
 copyDirectory(winUnpackedDir, installRoot);
 createShortcut(desktopShortcut, installExe, installRoot);
 createShortcut(startMenuShortcut, installExe, installRoot);

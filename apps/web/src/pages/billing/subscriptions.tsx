@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { CreditCard } from 'lucide-react';
-import { api } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CreditCard, RefreshCw } from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
 import { formatDate, formatCurrency, cn } from '@/lib/utils';
+import { toast } from '@/components/ui/toaster';
 import type { ApiResponse, PaginatedResponse, StripeSubscription, SubscriptionStatus } from '@sparqplug/types';
 
 const STATUS_COLORS: Record<SubscriptionStatus, string> = {
@@ -15,20 +16,60 @@ const STATUS_COLORS: Record<SubscriptionStatus, string> = {
   paused: 'bg-muted text-muted-foreground',
 };
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 export function BillingSubscriptionsPage() {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['billing-subscriptions'],
     queryFn: () =>
       api.get<ApiResponse<PaginatedResponse<StripeSubscription>>>('/billing/subscriptions'),
   });
 
+  const syncMutation = useMutation({
+    mutationFn: () => api.post<ApiResponse<{ synced: { customers: number; invoices: number; subscriptions: number } }>>('/billing/sync', { resources: ['customers', 'subscriptions'] }),
+    onSuccess: (response) => {
+      const syncedSubscriptions = response.data?.synced.subscriptions ?? 0;
+      queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
+      toast({
+        title: 'Stripe sync complete',
+        description: `Imported ${syncedSubscriptions} subscriptions from Stripe.`,
+        variant: 'success',
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Stripe sync failed',
+        description: getErrorMessage(error, 'The backend could not read Stripe subscriptions.'),
+        variant: 'destructive',
+      }),
+  });
+
   const subs = data?.data?.items ?? [];
 
   return (
     <div className="p-6 space-y-4 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">Subscriptions</h1>
-        <p className="text-sm text-muted-foreground">{subs.length} active plans</p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">Subscriptions</h1>
+          <p className="text-sm text-muted-foreground">{subs.length} synced subscriptions</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => syncMutation.mutate()}
+          disabled={syncMutation.isPending}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+          {syncMutation.isPending ? 'Syncing…' : 'Sync Stripe'}
+        </button>
       </div>
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -48,7 +89,7 @@ export function BillingSubscriptionsPage() {
                 <tr key={i}>{Array.from({ length: 5 }).map((_, j) => (<td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-3/4" /></td>))}</tr>
               ))
             ) : subs.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No subscriptions found</td></tr>
+              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No subscriptions found. Use Sync Stripe to import existing Stripe subscriptions.</td></tr>
             ) : (
               subs.map((sub) => (
                 <tr key={sub.id} className="hover:bg-muted/30 transition-colors">

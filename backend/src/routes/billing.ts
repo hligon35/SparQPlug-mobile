@@ -13,9 +13,298 @@ import { CreateInvoiceSchema } from '@sparqplug/types';
 export const billingRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 billingRouter.use('*', authMiddleware);
 
+const SYNC_RESOURCES = ['customers', 'invoices', 'subscriptions'] as const;
+const SyncBillingSchema = z.object({
+  resources: z.array(z.enum(SYNC_RESOURCES)).optional(),
+});
+
 function getStripe(secretKey: string) {
   return new Stripe(secretKey, { apiVersion: '2024-06-20' });
 }
+
+function serializeMetadata(metadata: Stripe.Metadata | null | undefined) {
+  if (!metadata) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(metadata).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0),
+  );
+}
+
+function shouldSyncOrganization(metadata: Stripe.Metadata | null | undefined, organizationId: string) {
+  const metadataOrganizationId = metadata?.organizationId;
+  return !metadataOrganizationId || metadataOrganizationId === organizationId;
+}
+
+function toIsoString(timestamp: number | null | undefined) {
+  return typeof timestamp === 'number' ? new Date(timestamp * 1000).toISOString() : null;
+}
+
+function mapInvoiceStatus(status: Stripe.Invoice.Status | null | undefined): 'draft' | 'open' | 'paid' | 'void' | 'uncollectible' {
+  switch (status) {
+    case 'open':
+    case 'paid':
+    case 'void':
+    case 'uncollectible':
+      return status;
+    case 'draft':
+    default:
+      return 'draft';
+  }
+}
+
+function mapSubscriptionStatus(status: Stripe.Subscription.Status): 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete' | 'incomplete_expired' | 'unpaid' | 'paused' {
+  switch (status) {
+    case 'active':
+    case 'trialing':
+    case 'past_due':
+    case 'canceled':
+    case 'incomplete':
+    case 'incomplete_expired':
+    case 'unpaid':
+    case 'paused':
+      return status;
+    default:
+      return 'incomplete';
+  }
+}
+
+function getSubscriptionPlanName(subscription: Stripe.Subscription) {
+  const firstItem = subscription.items.data[0];
+  if (!firstItem) {
+    return 'Stripe Subscription';
+  }
+
+  const nickname = firstItem.price.nickname?.trim();
+  if (nickname) {
+    return nickname;
+  }
+
+  return firstItem.price.id;
+}
+
+function getSubscriptionInterval(subscription: Stripe.Subscription): 'month' | 'year' | 'week' | 'day' {
+  const interval = subscription.items.data[0]?.price.recurring?.interval;
+  if (interval === 'month' || interval === 'year' || interval === 'week' || interval === 'day') {
+    return interval;
+  }
+
+  return 'month';
+}
+
+async function syncCustomerRecord(db: ReturnType<typeof createDb>, organizationId: string, customer: Stripe.Customer) {
+  if (customer.deleted || !shouldSyncOrganization(customer.metadata, organizationId)) {
+    return null;
+  }
+
+  const existingCustomer = await db.query.stripeCustomers.findFirst({
+    where: eq(stripeCustomers.stripeCustomerId, customer.id),
+  });
+
+  const metadata = serializeMetadata(customer.metadata);
+  const values = {
+    organizationId,
+    stripeCustomerId: customer.id,
+    contactId: existingCustomer?.contactId ?? metadata.contactId ?? null,
+    companyId: existingCustomer?.companyId ?? metadata.companyId ?? null,
+    email: customer.email ?? existingCustomer?.email ?? `${customer.id}@stripe.local`,
+    name: customer.name ?? existingCustomer?.name ?? customer.email ?? customer.id,
+    phone: customer.phone ?? existingCustomer?.phone ?? null,
+    currency: customer.currency ?? existingCustomer?.currency ?? 'usd',
+    balance: customer.balance ?? existingCustomer?.balance ?? 0,
+    delinquent: customer.delinquent ?? existingCustomer?.delinquent ?? false,
+    metadata,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existingCustomer) {
+    await db.update(stripeCustomers).set(values).where(eq(stripeCustomers.id, existingCustomer.id));
+    return existingCustomer.id;
+  }
+
+  const id = generateId();
+  await db.insert(stripeCustomers).values({ id, ...values });
+  return id;
+}
+
+async function ensureCustomerRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, customerRef: string | Stripe.Customer | Stripe.DeletedCustomer | null) {
+  if (!customerRef) {
+    return null;
+  }
+
+  const stripeCustomerId = typeof customerRef === 'string' ? customerRef : customerRef.id;
+  const existingCustomer = await db.query.stripeCustomers.findFirst({
+    where: and(eq(stripeCustomers.organizationId, organizationId), eq(stripeCustomers.stripeCustomerId, stripeCustomerId)),
+  });
+
+  if (existingCustomer) {
+    return existingCustomer;
+  }
+
+  const hydratedCustomer = typeof customerRef === 'string' ? await stripe.customers.retrieve(customerRef) : customerRef;
+  if ('deleted' in hydratedCustomer && hydratedCustomer.deleted) {
+    return null;
+  }
+
+  const syncedCustomerId = await syncCustomerRecord(db, organizationId, hydratedCustomer);
+  if (!syncedCustomerId) {
+    return null;
+  }
+
+  return db.query.stripeCustomers.findFirst({
+    where: and(eq(stripeCustomers.organizationId, organizationId), eq(stripeCustomers.id, syncedCustomerId)),
+  });
+}
+
+async function syncInvoiceRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, invoice: Stripe.Invoice) {
+  if (!shouldSyncOrganization(invoice.metadata, organizationId)) {
+    return null;
+  }
+
+  const customer = await ensureCustomerRecord(db, stripe, organizationId, invoice.customer);
+  if (!customer) {
+    return null;
+  }
+
+  const existingInvoice = await db.query.stripeInvoices.findFirst({
+    where: eq(stripeInvoices.stripeInvoiceId, invoice.id),
+  });
+
+  const lineItems = (invoice.lines?.data ?? []).map((line) => ({
+    id: line.id,
+    description: line.description ?? 'Stripe line item',
+    quantity: line.quantity ?? 1,
+    unitAmount: ((line.price?.unit_amount ?? line.amount ?? 0) / 100),
+    amount: (line.amount ?? 0) / 100,
+    currency: line.currency ?? invoice.currency ?? customer.currency,
+  }));
+
+  const values = {
+    organizationId,
+    stripeInvoiceId: invoice.id,
+    customerId: customer.id,
+    status: mapInvoiceStatus(invoice.status),
+    number: invoice.number ?? existingInvoice?.number ?? null,
+    currency: invoice.currency ?? existingInvoice?.currency ?? customer.currency,
+    subtotal: invoice.subtotal ?? existingInvoice?.subtotal ?? 0,
+    tax: invoice.tax ?? existingInvoice?.tax ?? 0,
+    discount: invoice.total_discount_amounts?.reduce((sum, item) => sum + item.amount, 0) ?? existingInvoice?.discount ?? 0,
+    total: invoice.total ?? existingInvoice?.total ?? 0,
+    amountPaid: invoice.amount_paid ?? existingInvoice?.amountPaid ?? 0,
+    amountDue: invoice.amount_remaining ?? invoice.amount_due ?? existingInvoice?.amountDue ?? 0,
+    lineItems: lineItems.length > 0 ? lineItems : existingInvoice?.lineItems ?? [],
+    dueDate: toIsoString(invoice.due_date) ?? existingInvoice?.dueDate ?? null,
+    paidAt: toIsoString(invoice.status_transitions?.paid_at) ?? existingInvoice?.paidAt ?? null,
+    periodStart: toIsoString(invoice.period_start) ?? existingInvoice?.periodStart ?? null,
+    periodEnd: toIsoString(invoice.period_end) ?? existingInvoice?.periodEnd ?? null,
+    pdfUrl: invoice.invoice_pdf ?? existingInvoice?.pdfUrl ?? null,
+    hostedUrl: invoice.hosted_invoice_url ?? existingInvoice?.hostedUrl ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existingInvoice) {
+    await db.update(stripeInvoices).set(values).where(eq(stripeInvoices.id, existingInvoice.id));
+    return existingInvoice.id;
+  }
+
+  const id = generateId();
+  await db.insert(stripeInvoices).values({ id, ...values });
+  return id;
+}
+
+async function syncSubscriptionRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, subscription: Stripe.Subscription) {
+  if (!shouldSyncOrganization(subscription.metadata, organizationId)) {
+    return null;
+  }
+
+  const customer = await ensureCustomerRecord(db, stripe, organizationId, subscription.customer);
+  if (!customer) {
+    return null;
+  }
+
+  const existingSubscription = await db.query.stripeSubscriptions.findFirst({
+    where: eq(stripeSubscriptions.stripeSubscriptionId, subscription.id),
+  });
+  const firstItem = subscription.items.data[0];
+
+  const values = {
+    organizationId,
+    stripeSubscriptionId: subscription.id,
+    customerId: customer.id,
+    status: mapSubscriptionStatus(subscription.status),
+    planName: getSubscriptionPlanName(subscription),
+    planId: firstItem?.price.id ?? existingSubscription?.planId ?? subscription.id,
+    quantity: firstItem?.quantity ?? existingSubscription?.quantity ?? 1,
+    currency: firstItem?.price.currency ?? existingSubscription?.currency ?? customer.currency,
+    amount: firstItem?.price.unit_amount ?? existingSubscription?.amount ?? 0,
+    interval: getSubscriptionInterval(subscription),
+    intervalCount: firstItem?.price.recurring?.interval_count ?? existingSubscription?.intervalCount ?? 1,
+    currentPeriodStart: toIsoString(subscription.current_period_start) ?? existingSubscription?.currentPeriodStart ?? new Date().toISOString(),
+    currentPeriodEnd: toIsoString(subscription.current_period_end) ?? existingSubscription?.currentPeriodEnd ?? new Date().toISOString(),
+    cancelAt: toIsoString(subscription.cancel_at) ?? existingSubscription?.cancelAt ?? null,
+    canceledAt: toIsoString(subscription.canceled_at) ?? existingSubscription?.canceledAt ?? null,
+    trialStart: toIsoString(subscription.trial_start) ?? existingSubscription?.trialStart ?? null,
+    trialEnd: toIsoString(subscription.trial_end) ?? existingSubscription?.trialEnd ?? null,
+    metadata: serializeMetadata(subscription.metadata),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existingSubscription) {
+    await db.update(stripeSubscriptions).set(values).where(eq(stripeSubscriptions.id, existingSubscription.id));
+    return existingSubscription.id;
+  }
+
+  const id = generateId();
+  await db.insert(stripeSubscriptions).values({ id, ...values });
+  return id;
+}
+
+billingRouter.post('/sync', zValidator('json', SyncBillingSchema), async (c) => {
+  const organizationId = c.get('organizationId');
+  const { resources } = c.req.valid('json');
+  const selectedResources = resources?.length ? resources : [...SYNC_RESOURCES];
+  const db = createDb(c.env.DB);
+  const stripe = getStripe(c.env.STRIPE_SECRET_KEY);
+  const synced = {
+    customers: 0,
+    invoices: 0,
+    subscriptions: 0,
+  };
+
+  if (selectedResources.includes('customers')) {
+    for await (const customer of stripe.customers.list({ limit: 100 })) {
+      if (customer.deleted) {
+        continue;
+      }
+
+      const syncedCustomerId = await syncCustomerRecord(db, organizationId, customer);
+      if (syncedCustomerId) {
+        synced.customers += 1;
+      }
+    }
+  }
+
+  if (selectedResources.includes('invoices')) {
+    for await (const invoice of stripe.invoices.list({ limit: 100 })) {
+      const syncedInvoiceId = await syncInvoiceRecord(db, stripe, organizationId, invoice);
+      if (syncedInvoiceId) {
+        synced.invoices += 1;
+      }
+    }
+  }
+
+  if (selectedResources.includes('subscriptions')) {
+    for await (const subscription of stripe.subscriptions.list({ status: 'all', limit: 100 })) {
+      const syncedSubscriptionId = await syncSubscriptionRecord(db, stripe, organizationId, subscription);
+      if (syncedSubscriptionId) {
+        synced.subscriptions += 1;
+      }
+    }
+  }
+
+  return c.json({ success: true, data: { synced } });
+});
 
 // ─── Customers ────────────────────────────────────────────────────────────────
 
@@ -45,7 +334,17 @@ billingRouter.post('/customers', zValidator('json', z.object({ email: z.string()
   const data = c.req.valid('json');
   const db = createDb(c.env.DB);
   const stripe = getStripe(c.env.STRIPE_SECRET_KEY);
-  const stripeCustomer = await stripe.customers.create({ email: data.email, name: data.name, phone: data.phone });
+  const stripeCustomer = await stripe.customers.create({
+    email: data.email,
+    name: data.name,
+    phone: data.phone,
+    metadata: {
+      organizationId: orgId,
+      source: 'sparqplug',
+      ...(data.contactId ? { contactId: data.contactId } : {}),
+      ...(data.companyId ? { companyId: data.companyId } : {}),
+    },
+  });
   const id = generateId();
   await db.insert(stripeCustomers).values({ id, organizationId: orgId, stripeCustomerId: stripeCustomer.id, ...data, currency: 'usd', balance: 0, delinquent: false, metadata: {} });
   const customer = await db.query.stripeCustomers.findFirst({ where: eq(stripeCustomers.id, id) });
@@ -83,6 +382,11 @@ billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (
     currency: data.currency,
     due_date: data.dueDate ? Math.floor(new Date(data.dueDate).getTime() / 1000) : undefined,
     auto_advance: data.autoSend,
+    metadata: {
+      organizationId: orgId,
+      source: 'sparqplug',
+      localCustomerId: customer.id,
+    },
   });
 
   for (const item of data.lineItems) {
