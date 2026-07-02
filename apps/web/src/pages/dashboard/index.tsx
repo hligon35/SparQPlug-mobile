@@ -11,6 +11,7 @@ import {
 import { Users, Building2, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { formatCurrency, formatCompactNumber, formatRelative, cn } from '@/lib/utils';
+import { PageShell } from '@/components/layout/page-shell';
 import type { ApiResponse, RevenueMetrics, PaginatedResponse, Contact, Opportunity } from '@sparqplug/types';
 
 // ─── Metric Card ─────────────────────────────────────────────────────────────
@@ -68,15 +69,8 @@ export function DashboardPage() {
   }));
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Page header */}
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Your business at a glance</p>
-      </div>
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <PageShell title="Dashboard" description="Your business at a glance">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Monthly Recurring Revenue"
           value={metrics ? formatCurrency(metrics.mrr) : '—'}
@@ -103,11 +97,9 @@ export function DashboardPage() {
         />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* MRR chart */}
-        <div className="lg:col-span-2 rounded-lg border border-border bg-card p-5">
-          <p className="text-sm font-semibold text-foreground mb-4">MRR Trend (12 months)</p>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
+        <div className="rounded-lg border border-border bg-card p-4 sm:p-5 lg:col-span-2">
+          <p className="mb-4 text-sm font-semibold text-foreground">MRR Trend (12 months)</p>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={revenueSparkline}>
               <defs>
@@ -128,9 +120,8 @@ export function DashboardPage() {
           </ResponsiveContainer>
         </div>
 
-        {/* Recent opportunities */}
-        <div className="rounded-lg border border-border bg-card p-5">
-          <p className="text-sm font-semibold text-foreground mb-4">Recent Opportunities</p>
+        <div className="rounded-lg border border-border bg-card p-4 sm:p-5">
+          <p className="mb-4 text-sm font-semibold text-foreground">Recent Opportunities</p>
           <div className="space-y-3">
             {opportunitiesData?.data?.items.map((opp) => (
               <div key={opp.id} className="flex items-start gap-3">
@@ -149,15 +140,14 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent contacts */}
       <div className="rounded-lg border border-border bg-card">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-5">
           <p className="text-sm font-semibold text-foreground">Recent Contacts</p>
           <a href="/crm/contacts" className="text-xs text-primary hover:underline">View all</a>
         </div>
         <div className="divide-y divide-border">
           {contactsData?.data?.items.map((contact) => (
-            <div key={contact.id} className="flex items-center gap-3 px-5 py-3">
+            <div key={contact.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:px-5">
               <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
                 <span className="text-xs font-semibold text-muted-foreground">
                   {contact.firstName[0]}{contact.lastName[0]}
@@ -169,13 +159,13 @@ export function DashboardPage() {
                 </p>
                 <p className="text-xs text-muted-foreground truncate">{contact.email}</p>
               </div>
-              <span className="text-xs text-muted-foreground shrink-0">{formatRelative(contact.createdAt)}</span>
+              <span className="text-xs text-muted-foreground sm:shrink-0">{formatRelative(contact.createdAt)}</span>
             </div>
           )) ?? (
-            <div className="px-5 py-8 text-center text-sm text-muted-foreground">No contacts yet</div>
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-5">No contacts yet</div>
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

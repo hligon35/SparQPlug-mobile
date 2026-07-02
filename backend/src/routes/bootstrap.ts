@@ -9,13 +9,18 @@ export const bootstrapRouter = new Hono<{ Bindings: Bindings; Variables: Variabl
 
 // ─── POST /api/bootstrap ──────────────────────────────────────────────────────
 // One-time setup: creates the Firebase account + seeds the admin user in D1.
-// Protected by BOOTSTRAP_SECRET env var — call once then remove or disable.
+// Protected by BOOTSTRAP_SECRET env var and disabled in production.
+// Bootstrap is for local development or tightly controlled setup only.
 //
 // curl -X POST http://localhost:8787/api/bootstrap \
 //   -H "Content-Type: application/json" \
 //   -d '{"secret":"<BOOTSTRAP_SECRET>"}'
 
 bootstrapRouter.post('/', async (c) => {
+  if (c.env.ENVIRONMENT === 'production') {
+    return c.json({ success: false, error: 'Not found' }, 404);
+  }
+
   const body = await c.req.json<{ secret?: string }>();
 
   const expectedSecret = (c.env as unknown as Record<string, string>)['BOOTSTRAP_SECRET'];

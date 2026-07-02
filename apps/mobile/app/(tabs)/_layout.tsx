@@ -19,7 +19,7 @@ export default function TabLayout() {
   }
 
   if (!user) {
-    return <Redirect href={'/sign-in' as Href} />;
+    return <Redirect href={'/(auth)/sign-in' as Href} />;
   }
 
   return (

@@ -1,7 +1,10 @@
 import * as SecureStore from 'expo-secure-store';
+import { useAuthStore } from '@/stores/auth-store';
 
 const runtimeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-const BASE_URL = runtimeEnv?.['EXPO_PUBLIC_API_BASE_URL'] ?? 'https://api.sparqplug.com/v1';
+const DEFAULT_BASE_URL = 'https://sparqplug-api.hligon.workers.dev/api/v1';
+const DEFAULT_TIMEOUT_MS = 15000;
+const BASE_URL = (runtimeEnv?.['EXPO_PUBLIC_API_BASE_URL'] ?? DEFAULT_BASE_URL).replace(/\/$/, '');
 const TOKEN_KEY = 'sparqplug_firebase_token';
 
 async function getToken(): Promise<string | null> {
@@ -18,10 +21,46 @@ export async function clearToken() {
 
 interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
+  timeoutMs?: number;
+}
+
+interface ApiErrorPayload {
+  error?:
+    | string
+    | {
+        message?: string;
+        code?: string;
+      };
+}
+
+async function parseJsonSafely<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+function getApiErrorDetails(payload: ApiErrorPayload | null) {
+  const nestedError = payload?.error;
+
+  if (typeof nestedError === 'string') {
+    return { message: nestedError, code: undefined };
+  }
+
+  return {
+    message: nestedError?.message ?? 'Request failed',
+    code: nestedError?.code,
+  };
 }
 
 async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const { params, ...init } = options;
+  const { params, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
 
   let url = `${BASE_URL}${path}`;
   if (params) {
@@ -40,12 +79,46 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const response = await fetch(url, { ...init, headers });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: { message: 'Request failed' } })) as { error?: { message: string } };
-    throw new Error(err.error?.message ?? 'Request failed');
+  const controller = new AbortController();
+  const timeoutId = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+
+  try {
+    const response = await fetch(url, { ...init, headers, signal: init.signal ?? controller.signal });
+    const payload = await parseJsonSafely<T & ApiErrorPayload>(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        await clearToken();
+        useAuthStore.getState().signOut();
+      }
+
+      const errorDetails = getApiErrorDetails(payload);
+      throw new ApiError(errorDetails.message, response.status, errorDetails.code);
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError('Request timed out', 408, 'REQUEST_TIMEOUT');
+    }
+
+    throw error;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
-  return response.json() as Promise<T>;
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
 export const api = {

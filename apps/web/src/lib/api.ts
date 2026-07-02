@@ -1,13 +1,82 @@
 import { useAuthStore } from '@/stores/auth-store';
 
-const BASE_URL = import.meta.env['VITE_API_BASE_URL'] as string ?? '/api/v1';
+const DEFAULT_BASE_URL = '/api/v1';
+const DEFAULT_TIMEOUT_MS = 15000;
+
+function resolveBaseUrl() {
+  const configuredBaseUrl = import.meta.env['VITE_API_BASE_URL'] as string | undefined;
+  const normalizedBaseUrl = configuredBaseUrl?.trim();
+
+  if (!normalizedBaseUrl) {
+    return DEFAULT_BASE_URL;
+  }
+
+  return normalizedBaseUrl.endsWith('/') ? normalizedBaseUrl.slice(0, -1) : normalizedBaseUrl;
+}
+
+const BASE_URL = resolveBaseUrl();
 
 interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
+  timeoutMs?: number;
+}
+
+interface ApiErrorPayload {
+  error?:
+    | string
+    | {
+        message?: string;
+        code?: string;
+      };
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const loginPath = '/auth/login';
+
+  if (window.location.protocol === 'file:') {
+    if (window.location.hash !== `#${loginPath}`) {
+      window.location.hash = loginPath;
+    }
+    return;
+  }
+
+  if (window.location.pathname !== loginPath) {
+    window.location.replace(loginPath);
+  }
+}
+
+async function parseJsonSafely<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+function getApiErrorDetails(payload: ApiErrorPayload | null) {
+  const nestedError = payload?.error;
+
+  if (typeof nestedError === 'string') {
+    return { message: nestedError, code: undefined };
+  }
+
+  return {
+    message: nestedError?.message ?? 'Request failed',
+    code: nestedError?.code,
+  };
 }
 
 async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const { params, ...init } = options;
+  const { params, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
 
   let url = `${BASE_URL}${path}`;
   if (params) {
@@ -31,14 +100,40 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, { ...init, headers });
+  const controller = new AbortController();
+  const timeoutId = timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: 'Request failed' } })) as { error?: { message: string; code?: string } };
-    throw new ApiError(error.error?.message ?? 'Request failed', response.status, error.error?.code);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      signal: init.signal ?? controller.signal,
+    });
+
+    const payload = await parseJsonSafely<T & ApiErrorPayload>(response);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        useAuthStore.getState().signOut();
+        redirectToLogin();
+      }
+
+      const errorDetails = getApiErrorDetails(payload);
+      throw new ApiError(errorDetails.message, response.status, errorDetails.code);
+    }
+
+    return payload as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError('Request timed out', 408, 'REQUEST_TIMEOUT');
+    }
+
+    throw error;
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
   }
-
-  return response.json() as Promise<T>;
 }
 
 export class ApiError extends Error {

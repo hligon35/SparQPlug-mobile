@@ -1,14 +1,13 @@
-import { Search, Bell, Sun, Moon, LogOut } from 'lucide-react';
+import { Search, Bell, Sun, Moon, LogOut, Menu } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUIStore } from '@/stores/ui-store';
 import { useTheme } from '@/providers/theme-provider';
-import { cn } from '@/lib/utils';
 
 export function Topbar() {
   const { user, signOut: clearAuth } = useAuthStore();
-  const { setCommandPaletteOpen } = useUIStore();
+  const { setCommandPaletteOpen, setMobileSidebarOpen } = useUIStore();
   const { theme, setTheme } = useTheme();
 
   async function handleSignOut() {
@@ -17,45 +16,53 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm px-4 gap-4">
-      {/* Search trigger */}
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-sm sm:px-4">
       <button
+        type="button"
+        onClick={() => setMobileSidebarOpen(true)}
+        className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
+        aria-label="Open navigation menu"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      <button
+        type="button"
         onClick={() => setCommandPaletteOpen(true)}
-        className="flex items-center gap-2 h-9 w-full max-w-sm rounded-md border border-input bg-muted/40 px-3 text-sm text-muted-foreground hover:bg-muted transition-colors"
+        className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted sm:max-w-xl"
         aria-label="Open command palette"
       >
-        <Search className="h-3.5 w-3.5 shrink-0" />
+        <Search className="h-4 w-4 shrink-0" />
         <span className="truncate">Search or jump to…</span>
-        <kbd className="ml-auto font-mono text-[10px] bg-background border border-border rounded px-1.5 py-0.5 text-muted-foreground">
+        <kbd className="ml-auto hidden rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">
           ⌘K
         </kbd>
       </button>
 
-      {/* Actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        {/* Theme toggle */}
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
         <button
+          type="button"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Toggle theme"
         >
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        {/* Notifications */}
         <button
-          className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors relative"
+          type="button"
+          className="relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4" />
-          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary" />
+          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
         </button>
 
-        {/* Sign out */}
         <button
+          type="button"
           onClick={handleSignOut}
-          className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
-          aria-label="Sign out"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={user?.name ? `Sign out ${user.name}` : 'Sign out'}
         >
           <LogOut className="h-4 w-4" />
         </button>
