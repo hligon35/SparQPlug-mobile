@@ -9,6 +9,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setUser, setOrganization, setFirebaseToken, setLoading, signOut } = useAuthStore();
 
   useEffect(() => {
+    setLoading(true);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         signOut();

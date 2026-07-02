@@ -1,12 +1,30 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { Globe, Plus, TrendingUp, DollarSign, TrendingDown } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Globe, Plus, TrendingUp, DollarSign, TrendingDown, Search, Trash2 } from 'lucide-react';
+import { ApiError, api } from '@/lib/api';
 import { formatCompactNumber, formatDate } from '@/lib/utils';
+import { Dialog } from '@/components/ui/dialog';
+import { toast } from '@/components/ui/toaster';
 import type { ApiResponse, PaginatedResponse, AnalyticsDomain, AnalyticsSnapshot, AnalyticsDateRange } from '@sparqplug/types';
+
+const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+type CloudflareZone = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError || error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 const DATE_RANGES: { label: string; value: AnalyticsDateRange }[] = [
   { label: '1h', value: '1h' },
@@ -157,15 +175,62 @@ function ProfitabilitySection() {
 }
 
 export function AnalyticsPage() {
+  const queryClient = useQueryClient();
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<AnalyticsDateRange>('7d');
+  const [showAddDomain, setShowAddDomain] = useState(false);
+  const [domainName, setDomainName] = useState('');
+  const [zoneSearch, setZoneSearch] = useState('');
+  const [selectedZoneId, setSelectedZoneId] = useState('');
 
   const { data: domainsData } = useQuery({
     queryKey: ['analytics-domains'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<AnalyticsDomain>>>('/analytics/domains'),
   });
 
+  const { data: zonesData, isLoading: zonesLoading } = useQuery({
+    queryKey: ['cloudflare-zones', zoneSearch],
+    queryFn: () => api.get<ApiResponse<CloudflareZone[]>>('/analytics/domains/zones', { name: zoneSearch || undefined }),
+    enabled: showAddDomain,
+  });
+
+  const createDomainMutation = useMutation({
+    mutationFn: () => api.post<ApiResponse<AnalyticsDomain>>('/analytics/domains', { name: domainName.trim(), zoneId: selectedZoneId || undefined }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics-domains'] });
+      setShowAddDomain(false);
+      setDomainName('');
+      setZoneSearch('');
+      setSelectedZoneId('');
+      toast({ title: 'Domain added', variant: 'success' });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to add domain',
+        description: getErrorMessage(error, 'Review the domain and zone details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const deleteDomainMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/analytics/domains/${id}`),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['analytics-domains'] });
+      toast({ title: 'Domain removed', variant: 'success' });
+      if (selectedDomain && domains.find((domain) => domain.id === id)?.zoneId === selectedDomain) {
+        setSelectedDomain(null);
+      }
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to remove domain',
+        description: getErrorMessage(error, 'The domain could not be removed.'),
+        variant: 'destructive',
+      }),
+  });
+
   const domains = domainsData?.data?.items ?? [];
+  const zones = zonesData?.data ?? [];
 
   useEffect(() => {
     if (!selectedDomain && domains[0]) {
@@ -191,7 +256,7 @@ export function AnalyticsPage() {
           <h1 className="text-xl font-semibold text-foreground">Analytics</h1>
           <p className="text-sm text-muted-foreground">Cloudflare traffic insights</p>
         </div>
-        <button className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+        <button onClick={() => setShowAddDomain(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" />
           Add Domain
         </button>
@@ -200,14 +265,23 @@ export function AnalyticsPage() {
       {/* Domain + date range selectors */}
       <div className="flex flex-wrap items-center gap-3">
         {domains.map((d) => (
-          <button
-            key={d.zoneId}
-            onClick={() => setSelectedDomain(d.zoneId)}
-            className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border transition-colors ${selectedDomain === d.zoneId ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-          >
-            <Globe className="h-3.5 w-3.5" />
-            {d.domain}
-          </button>
+          <div key={d.id} className={`inline-flex items-center gap-1 rounded-md border ${selectedDomain === d.zoneId ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
+            <button
+              onClick={() => setSelectedDomain(d.zoneId)}
+              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm transition-colors ${selectedDomain === d.zoneId ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {d.name}
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteDomainMutation.mutate(d.id)}
+              className="mr-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+              aria-label={`Remove ${d.name}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         ))}
 
         <div className="ml-auto flex items-center gap-1 bg-muted rounded-lg p-1">
@@ -302,6 +376,83 @@ export function AnalyticsPage() {
       <div className="border-t border-border pt-6">
         <ProfitabilitySection />
       </div>
+
+      <Dialog
+        open={showAddDomain}
+        onOpenChange={(open) => {
+          setShowAddDomain(open);
+          if (!open) {
+            setDomainName('');
+            setZoneSearch('');
+            setSelectedZoneId('');
+          }
+        }}
+        title="Add Analytics Domain"
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            createDomainMutation.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Domain</label>
+            <input
+              required
+              className={inputClass}
+              value={domainName}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDomainName(value);
+                setZoneSearch(value);
+              }}
+              placeholder="example.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Cloudflare zone</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input className={`${inputClass} pl-9`} value={zoneSearch} onChange={(event) => setZoneSearch(event.target.value)} placeholder="Search Cloudflare zones" />
+            </div>
+            <div className="max-h-60 overflow-y-auto rounded-md border border-border bg-card p-2">
+              {zonesLoading ? (
+                <p className="px-2 py-3 text-sm text-muted-foreground">Loading zones…</p>
+              ) : zones.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-muted-foreground">No Cloudflare zones found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {zones.map((zone) => {
+                    const active = selectedZoneId === zone.id;
+                    return (
+                      <button
+                        key={zone.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedZoneId(zone.id);
+                          setDomainName(zone.name);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'}`}
+                      >
+                        <span className="truncate">{zone.name}</span>
+                        <span className="ml-3 shrink-0 text-xs text-muted-foreground">{zone.status}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">Cloudflare credentials are already configured in the deployed backend environment.</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => setShowAddDomain(false)} className="h-9 rounded-md border border-border px-4 text-sm transition-colors hover:bg-muted">Cancel</button>
+            <button type="submit" disabled={createDomainMutation.isPending || !domainName.trim()} className="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+              {createDomainMutation.isPending ? 'Adding…' : 'Add Domain'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

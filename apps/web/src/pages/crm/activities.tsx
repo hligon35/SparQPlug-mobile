@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Phone, Mail, Calendar, FileText, CheckSquare, Activity, Plus } from 'lucide-react';
+import { Phone, Mail, Calendar, FileText, CheckSquare, Activity, Plus, Pencil } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatDateTime, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -40,9 +40,24 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function toDateTimeLocalValue(value: string | null | undefined) {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value.slice(0, 16);
+  }
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 export function ActivitiesPage() {
   const queryClient = useQueryClient();
-  const [showCreate, setShowCreate] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<ActivityType | null>(null);
   const [form, setForm] = useState<ActivityFormValues>(initialForm);
   const { data, isLoading } = useQuery({
     queryKey: ['activities', { page: 1 }],
@@ -55,8 +70,7 @@ export function ActivitiesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['activities'] });
       toast({ title: 'Activity logged', variant: 'success' });
-      setShowCreate(false);
-      setForm(initialForm);
+      closeDialog();
     },
     onError: (error) =>
       toast({
@@ -66,20 +80,61 @@ export function ActivitiesPage() {
       }),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ActivityFormValues }) =>
+      api.patch(`/activities/${id}`, normalizeActivityPayload(data)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+      toast({ title: 'Activity updated', variant: 'success' });
+      closeDialog();
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update activity',
+        description: getErrorMessage(error, 'Review the activity details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
   const { data: companiesData } = useQuery({
     queryKey: ['companies-list'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Company>>>('/companies', { limit: 200 }),
-    enabled: showCreate,
+    enabled: showDialog,
   });
   const { data: contactsData } = useQuery({
     queryKey: ['contacts-list'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Contact>>>('/contacts', { limit: 200 }),
-    enabled: showCreate,
+    enabled: showDialog,
   });
   const companiesList = companiesData?.data?.items ?? [];
   const contactsList = contactsData?.data?.items ?? [];
 
   const activities = data?.data?.items ?? [];
+
+  function openCreateDialog() {
+    setEditingActivity(null);
+    setForm(initialForm);
+    setShowDialog(true);
+  }
+
+  function openEditDialog(activity: ActivityType) {
+    setEditingActivity(activity);
+    setForm({
+      type: activity.type,
+      subject: activity.subject ?? '',
+      description: activity.description ?? '',
+      scheduledAt: toDateTimeLocalValue(activity.scheduledAt),
+      contactId: activity.contactId ?? '',
+      companyId: activity.companyId ?? '',
+    });
+    setShowDialog(true);
+  }
+
+  function closeDialog() {
+    setShowDialog(false);
+    setEditingActivity(null);
+    setForm(initialForm);
+  }
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
@@ -88,7 +143,7 @@ export function ActivitiesPage() {
           <h1 className="text-xl font-semibold text-foreground">Activities</h1>
           <p className="text-sm text-muted-foreground">Recent interactions and events</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+        <button onClick={openCreateDialog} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" />
           Log Activity
         </button>
@@ -126,8 +181,21 @@ export function ActivitiesPage() {
                   </div>
                   <div className="flex-1 rounded-lg border border-border bg-card p-4 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-medium text-foreground capitalize">{activity.type.replace('_', ' ')}</p>
-                      <p className="text-xs text-muted-foreground shrink-0">{formatDateTime(activity.createdAt)}</p>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{activity.subject ?? activity.type.replace('_', ' ')}</p>
+                        <p className="text-xs capitalize text-muted-foreground">{activity.type.replace('_', ' ')}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-muted-foreground shrink-0">{formatDateTime(activity.createdAt)}</p>
+                        <button
+                          type="button"
+                          onClick={() => openEditDialog(activity)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          aria-label={`Edit ${activity.subject ?? activity.type}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                     {activity.description && (
                       <p className="text-sm text-muted-foreground mt-1">{activity.description}</p>
@@ -140,8 +208,34 @@ export function ActivitiesPage() {
         </div>
       )}
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate} title="Log Activity">
-        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !createMutation.isPending && !updateMutation.isPending) {
+            closeDialog();
+            return;
+          }
+
+          setShowDialog(open);
+        }}
+        title={editingActivity ? 'Edit Activity' : 'Log Activity'}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (createMutation.isPending || updateMutation.isPending) {
+              return;
+            }
+
+            if (editingActivity) {
+              updateMutation.mutate({ id: editingActivity.id, data: form });
+              return;
+            }
+
+            createMutation.mutate(form);
+          }}
+          className="space-y-3"
+        >
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Type</label>
@@ -184,9 +278,15 @@ export function ActivitiesPage() {
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {createMutation.isPending ? 'Logging…' : 'Log Activity'}
+            <button type="button" onClick={closeDialog} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+              {createMutation.isPending || updateMutation.isPending
+                ? editingActivity
+                  ? 'Saving…'
+                  : 'Logging…'
+                : editingActivity
+                  ? 'Save Changes'
+                  : 'Log Activity'}
             </button>
           </div>
         </form>

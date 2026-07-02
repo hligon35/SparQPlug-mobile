@@ -8,6 +8,140 @@ import { generateId } from '../lib/utils';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 
+type CloudflareZone = {
+  id: string;
+  name: string;
+  status: string;
+};
+
+type GraphqlGroup = {
+  sum?: {
+    requests?: number;
+    pageViews?: number;
+    bytes?: number;
+    threats?: number;
+    cachedRequests?: number;
+  };
+  uniq?: {
+    uniques?: number;
+  };
+  dimensions?: {
+    datetime?: string;
+    clientCountryName?: string;
+  };
+};
+
+type GraphqlResponse = {
+  data?: {
+    viewer?: {
+      zones?: Array<{
+        httpRequests1hGroups?: GraphqlGroup[];
+        topCountries?: GraphqlGroup[];
+      }>;
+    };
+  };
+  errors?: Array<{ message?: string }>;
+};
+
+function normalizeDomainName(input: string) {
+  return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+async function fetchCloudflareZones(token: string, name?: string): Promise<CloudflareZone[]> {
+  const params = new URLSearchParams({ per_page: '50', status: 'active' });
+  if (name) {
+    params.set('name', normalizeDomainName(name));
+  }
+
+  const response = await fetch(`https://api.cloudflare.com/client/v4/zones?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Unable to load Cloudflare zones');
+  }
+
+  const payload = (await response.json()) as {
+    success?: boolean;
+    result?: CloudflareZone[];
+    errors?: Array<{ message?: string }>;
+  };
+
+  if (!payload.success) {
+    throw new Error(payload.errors?.[0]?.message ?? 'Unable to load Cloudflare zones');
+  }
+
+  return payload.result ?? [];
+}
+
+function buildAnalyticsSnapshot(
+  domainId: string,
+  zoneId: string,
+  range: string,
+  requestGroups: GraphqlGroup[],
+  countryGroups: GraphqlGroup[],
+) {
+  const totals = requestGroups.reduce(
+    (acc, group) => {
+      acc.requests += group.sum?.requests ?? 0;
+      acc.pageViews += group.sum?.pageViews ?? 0;
+      acc.bandwidth += group.sum?.bytes ?? 0;
+      acc.threats += group.sum?.threats ?? 0;
+      acc.cachedRequests += group.sum?.cachedRequests ?? 0;
+      acc.uniqueVisitors += group.uniq?.uniques ?? 0;
+      return acc;
+    },
+    { requests: 0, pageViews: 0, bandwidth: 0, threats: 0, cachedRequests: 0, uniqueVisitors: 0 },
+  );
+
+  const timeseries = requestGroups.map((group) => ({
+    timestamp: group.dimensions?.datetime ?? new Date().toISOString(),
+    requests: group.sum?.requests ?? 0,
+    visitors: group.uniq?.uniques ?? 0,
+    bandwidth: group.sum?.bytes ?? 0,
+    threats: group.sum?.threats ?? 0,
+    cacheHits: group.sum?.cachedRequests ?? 0,
+    originRequests: Math.max((group.sum?.requests ?? 0) - (group.sum?.cachedRequests ?? 0), 0),
+  }));
+
+  return {
+    id: `${domainId}:${range}`,
+    domainId,
+    zoneId,
+    metrics: {
+      requests: totals.requests,
+      totalRequests: totals.requests,
+      uniqueVisitors: totals.uniqueVisitors,
+      pageViews: totals.pageViews,
+      bandwidth: totals.bandwidth,
+      cacheHitRatio: totals.requests > 0 ? Number(((totals.cachedRequests / totals.requests) * 100).toFixed(2)) : 0,
+      threats: totals.threats,
+      botTraffic: 0,
+      blockedRequests: totals.threats,
+      originRequests: Math.max(totals.requests - totals.cachedRequests, 0),
+      originErrors: 0,
+      avgResponseTime: 0,
+    },
+    timeseries,
+    trafficTimeseries: timeseries,
+    topPages: [],
+    topCountries: countryGroups.map((group) => ({
+      country: group.dimensions?.clientCountryName ?? 'Unknown',
+      countryCode: '',
+      countryName: group.dimensions?.clientCountryName ?? 'Unknown',
+      requests: group.sum?.requests ?? 0,
+      visitors: 0,
+      bandwidth: group.sum?.bytes ?? 0,
+    })),
+    securityEvents: [],
+    dateFilter: { range },
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 export const analyticsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 analyticsRouter.use('*', authMiddleware);
 
@@ -17,24 +151,88 @@ analyticsRouter.get('/domains', async (c) => {
   const orgId = c.get('organizationId');
   const db = createDb(c.env.DB);
   const domains = await db.query.analyticsDomains.findMany({ where: eq(analyticsDomains.organizationId, orgId) });
-  return c.json({ success: true, data: domains });
+  return c.json({ success: true, data: { items: domains, total: domains.length, page: 1, limit: Math.max(domains.length, 1), hasMore: false } });
 });
 
-analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().min(1), zoneId: z.string().min(1) })), async (c) => {
+analyticsRouter.get('/domains/zones', zValidator('query', z.object({ name: z.string().optional() })), async (c) => {
+  try {
+    const zones = await fetchCloudflareZones(c.env.CLOUDFLARE_ANALYTICS_TOKEN, c.req.valid('query').name);
+    return c.json({ success: true, data: zones });
+  } catch (error) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'ZONE_LOOKUP_FAILED',
+          message: error instanceof Error ? error.message : 'Unable to load Cloudflare zones',
+        },
+      },
+      502,
+    );
+  }
+});
+
+analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().min(1), zoneId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { name, zoneId } = c.req.valid('json');
   const db = createDb(c.env.DB);
+  const normalizedName = normalizeDomainName(name);
+
+  let resolvedZoneId = zoneId?.trim();
+  if (!resolvedZoneId) {
+    const zones = await fetchCloudflareZones(c.env.CLOUDFLARE_ANALYTICS_TOKEN, normalizedName);
+    const exactZone = zones.find((zone) => normalizeDomainName(zone.name) === normalizedName);
+    if (!exactZone) {
+      return c.json({ success: false, error: { code: 'ZONE_NOT_FOUND', message: 'No matching Cloudflare zone found.' } }, 404);
+    }
+    resolvedZoneId = exactZone.id;
+  }
+
+  const existing = await db.query.analyticsDomains.findFirst({
+    where: and(eq(analyticsDomains.organizationId, orgId), eq(analyticsDomains.zoneId, resolvedZoneId)),
+  });
+
+  if (existing) {
+    return c.json({ success: true, data: existing });
+  }
+
   const id = generateId();
-  await db.insert(analyticsDomains).values({ id, organizationId: orgId, name, zoneId, status: 'active' });
+  await db.insert(analyticsDomains).values({ id, organizationId: orgId, name: normalizedName, zoneId: resolvedZoneId, status: 'active' });
   const domain = await db.query.analyticsDomains.findFirst({ where: eq(analyticsDomains.id, id) });
   return c.json({ success: true, data: domain }, 201);
 });
 
+analyticsRouter.delete('/domains/:id', async (c) => {
+  const orgId = c.get('organizationId');
+  const db = createDb(c.env.DB);
+
+  const domain = await db.query.analyticsDomains.findFirst({
+    where: and(eq(analyticsDomains.id, c.req.param('id')), eq(analyticsDomains.organizationId, orgId)),
+  });
+
+  if (!domain) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Domain not found' } }, 404);
+  }
+
+  await db.delete(analyticsDomains).where(eq(analyticsDomains.id, domain.id));
+  return c.json({ success: true, data: { id: domain.id } });
+});
+
 // ─── Fetch Analytics from Cloudflare ─────────────────────────────────────────
 
-analyticsRouter.get('/zones/:zoneId', zValidator('query', z.object({ since: z.string().optional(), until: z.string().optional(), range: z.string().default('24h') })), async (c) => {
+analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ since: z.string().optional(), until: z.string().optional(), range: z.string().default('24h') })), async (c) => {
+  const orgId = c.get('organizationId');
   const zoneId = c.req.param('zoneId');
   const { since, until, range } = c.req.valid('query');
+  const db = createDb(c.env.DB);
+
+  const domain = await db.query.analyticsDomains.findFirst({
+    where: and(eq(analyticsDomains.organizationId, orgId), eq(analyticsDomains.zoneId, zoneId)),
+  });
+
+  if (!domain) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Analytics domain not found' } }, 404);
+  }
 
   // Calculate date range
   const now = new Date();
@@ -81,6 +279,21 @@ analyticsRouter.get('/zones/:zoneId', zValidator('query', z.object({ since: z.st
     return c.json({ success: false, error: { code: 'ANALYTICS_ERROR', message: 'Failed to fetch analytics' } }, 502);
   }
 
-  const result = await resp.json() as Record<string, unknown>;
-  return c.json({ success: true, data: result });
+  const result = (await resp.json()) as GraphqlResponse;
+
+  if (result.errors?.length) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'ANALYTICS_ERROR',
+          message: result.errors[0]?.message ?? 'Failed to fetch analytics',
+        },
+      },
+      502,
+    );
+  }
+
+  const zone = result.data?.viewer?.zones?.[0];
+  return c.json({ success: true, data: buildAnalyticsSnapshot(domain.id, zoneId, range, zone?.httpRequests1hGroups ?? [], zone?.topCountries ?? []) });
 });

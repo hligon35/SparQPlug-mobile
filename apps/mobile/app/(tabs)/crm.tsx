@@ -41,6 +41,8 @@ const COLORS = {
   danger: '#ef4444',
 };
 
+const URL_PREFIX = 'https://';
+
 const SERVICES: Array<{ value: PasswordLockerService; label: string }> = [
   { value: 'facebook', label: 'Facebook' },
   { value: 'google', label: 'Google' },
@@ -116,13 +118,94 @@ const CONTACT_STATUSES: Array<ContactInput['status']> = ['lead', 'active', 'pros
 const COMPANY_STATUSES: Array<CompanyInput['status']> = ['prospect', 'active', 'customer', 'inactive', 'churned'];
 const COMPANY_SIZES: Array<NonNullable<CompanyInput['size']>> = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1000+'];
 
+type PasswordLockersListResponse = ApiResponse<PasswordLocker[]> & {
+  meta?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+  };
+};
+
 function maskPassword(value: string): string {
   if (!value) return '••••••••';
   return '•'.repeat(Math.min(Math.max(value.length, 8), 16));
 }
 
-function getItems<T>(response?: ApiResponse<PaginatedResponse<T>>): T[] {
+function trimOrUndefined(value: string | null | undefined) {
+  if (value == null) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+function prefillUrlField(value: string) {
+  return value.trim() === '' ? URL_PREFIX : value;
+}
+
+function normalizeUrlField(value: string | null | undefined) {
+  const trimmed = trimOrUndefined(value);
+
+  if (!trimmed || trimmed === URL_PREFIX || trimmed === 'http://') {
+    return undefined;
+  }
+
+  if (/^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `${URL_PREFIX}${trimmed.replace(/^\/+/, '')}`;
+}
+
+function formatPhoneInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const digits = trimmed.replace(/\D/g, '');
+  const hasPlusPrefix = trimmed.startsWith('+');
+
+  if (!digits) {
+    return hasPlusPrefix ? '+' : '';
+  }
+
+  const isUsNumber = digits.length <= 10 || (digits.length === 11 && digits.startsWith('1'));
+  if (isUsNumber) {
+    const countryCode = digits.length === 11 ? '1' : '';
+    const nationalDigits = countryCode ? digits.slice(1) : digits;
+    const area = nationalDigits.slice(0, 3);
+    const prefix = nationalDigits.slice(3, 6);
+    const line = nationalDigits.slice(6, 10);
+
+    let formatted = '';
+    if (countryCode) {
+      formatted += `+${countryCode} `;
+    }
+    if (area) {
+      formatted += area.length < 3 ? `(${area}` : `(${area})`;
+    }
+    if (prefix) {
+      formatted += area.length === 3 ? ` ${prefix}` : prefix;
+    }
+    if (line) {
+      formatted += `-${line}`;
+    }
+
+    return formatted;
+  }
+
+  return hasPlusPrefix ? `+${digits}` : digits;
+}
+
+function getItems<T>(response?: ApiResponse<PaginatedResponse<T>> | ApiResponse<T[]>): T[] {
   if (!response?.data) return [];
+
+  if (Array.isArray(response.data)) {
+    return response.data;
+  }
+
   return response.data.items ?? response.data.data ?? [];
 }
 
@@ -148,10 +231,10 @@ export default function CRMScreen() {
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Contact>>>('/contacts', { limit: 30 }),
   });
 
-  const { data: lockersData, isLoading: lockersLoading } = useQuery<ApiResponse<PaginatedResponse<PasswordLocker>>>({
+  const { data: lockersData, isLoading: lockersLoading } = useQuery<PasswordLockersListResponse>({
     queryKey: ['password-lockers', { page: 1, search }],
     queryFn: () =>
-      api.get<ApiResponse<PaginatedResponse<PasswordLocker>>>('/password-lockers', {
+      api.get<PasswordLockersListResponse>('/password-lockers', {
         page: 1,
         limit: 50,
         search: search || undefined,
@@ -170,7 +253,7 @@ export default function CRMScreen() {
         service: payload.service,
         username: payload.username.trim() || null,
         accountEmail: payload.accountEmail.trim() || null,
-        loginUrl: payload.loginUrl.trim() || null,
+        loginUrl: normalizeUrlField(payload.loginUrl) ?? null,
         password: payload.password,
         notes: payload.notes.trim() || null,
       }),
@@ -191,7 +274,7 @@ export default function CRMScreen() {
         service: payload.service,
         username: payload.username.trim() || null,
         accountEmail: payload.accountEmail.trim() || null,
-        loginUrl: payload.loginUrl.trim() || null,
+        loginUrl: normalizeUrlField(payload.loginUrl) ?? null,
         notes: payload.notes.trim() || null,
         ...(payload.password ? { password: payload.password } : {}),
       }),
@@ -223,7 +306,7 @@ export default function CRMScreen() {
 
   const contacts = getItems<Contact>(contactsData);
   const companies = getItems<Company>(companiesData);
-  const lockers = getItems<PasswordLocker>(lockersData);
+  const lockers = lockersData?.data ?? [];
 
   const updateContactCompanyMutation = useMutation({
     mutationFn: ({ contactId, companyId }: { contactId: string; companyId: string | null }) =>
@@ -244,7 +327,7 @@ export default function CRMScreen() {
         firstName: payload.firstName.trim(),
         lastName: payload.lastName.trim(),
         email: payload.email.trim() || null,
-        phone: payload.phone.trim() || null,
+        phone: formatPhoneInput(payload.phone).trim() || null,
         title: payload.title.trim() || null,
         companyId: payload.companyId || null,
         status: payload.status,
@@ -265,7 +348,7 @@ export default function CRMScreen() {
       api.post('/companies', {
         name: payload.name.trim(),
         industry: payload.industry.trim() || null,
-        website: payload.website.trim() || null,
+        website: normalizeUrlField(payload.website) ?? null,
         size: payload.size || null,
         status: payload.status,
         tags: [],
@@ -623,6 +706,7 @@ export default function CRMScreen() {
                 placeholder="Login URL"
                 placeholderTextColor={COLORS.muted}
                 value={form.loginUrl}
+                onFocus={() => setForm((prev) => ({ ...prev, loginUrl: prefillUrlField(prev.loginUrl) }))}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, loginUrl: value }))}
                 autoCapitalize="none"
               />
@@ -774,7 +858,7 @@ export default function CRMScreen() {
                 placeholder="Phone"
                 placeholderTextColor={COLORS.muted}
                 value={contactForm.phone}
-                onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: value }))}
+                onChangeText={(value) => setContactForm((prev) => ({ ...prev, phone: formatPhoneInput(value) }))}
                 keyboardType="phone-pad"
               />
               <TextInput
@@ -874,6 +958,7 @@ export default function CRMScreen() {
                 placeholder="Website"
                 placeholderTextColor={COLORS.muted}
                 value={companyForm.website}
+                onFocus={() => setCompanyForm((prev) => ({ ...prev, website: prefillUrlField(prev.website) }))}
                 onChangeText={(value) => setCompanyForm((prev) => ({ ...prev, website: value }))}
                 autoCapitalize="none"
               />

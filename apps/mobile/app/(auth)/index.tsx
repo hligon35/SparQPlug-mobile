@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -53,7 +54,7 @@ export default function SignInScreen() {
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.hero}>
             <Text style={styles.title}>Welcome back</Text>
             <Text style={styles.subtitle}>Sign in to connect SparQPlug mobile to your live workspace.</Text>
@@ -96,7 +97,7 @@ export default function SignInScreen() {
               Use the same Firebase account credentials as the web app or the bootstrap admin account.
             </Text>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -105,7 +106,7 @@ export default function SignInScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   keyboardView: { flex: 1 },
-  content: { flex: 1, justifyContent: 'center', padding: 20, gap: 20 },
+  content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 24, gap: 20 },
   hero: { gap: 8 },
   title: { color: COLORS.text, fontSize: 30, fontWeight: '700' },
   subtitle: { color: COLORS.muted, fontSize: 15, lineHeight: 22 },

@@ -158,13 +158,16 @@ export function normalizeContactPayload(form: ContactFormValues): ContactInput {
   };
 }
 
-export function normalizeCompanyPayload(form: CompanyFormValues): CompanyInput {
+export function normalizeCompanyPayload(
+  form: CompanyFormValues,
+  status: CompanyInput['status'] = 'prospect',
+): CompanyInput {
   return {
     name: form.name.trim(),
     industry: trimOrUndefined(form.industry),
     website: normalizeUrlField(form.website),
     size: emptyToUndefined(form.size) as CompanyInput['size'],
-    status: 'prospect',
+    status,
     tags: [],
     customFields: {},
   };

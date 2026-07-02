@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Mail, Phone, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Mail, Phone, Trash2, Eye, Pencil } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatRelative, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -57,7 +57,8 @@ export function ContactsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [form, setForm] = useState<ContactFormValues>(initialForm);
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
   const LIMIT = 20;
@@ -92,8 +93,7 @@ export function ContactsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] });
       toast({ title: 'Contact created', variant: 'success' });
-      setShowCreate(false);
-      setForm(initialForm);
+      closeDialog();
     },
     onError: (error) =>
       toast({
@@ -103,10 +103,25 @@ export function ContactsPage() {
       }),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ContactInput }) => api.patch(`/contacts/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      toast({ title: 'Contact updated', variant: 'success' });
+      closeDialog();
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update contact',
+        description: getErrorMessage(error, 'Review the contact details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
   const { data: companiesData } = useQuery({
     queryKey: ['companies-list'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Company>>>('/companies', { limit: 200 }),
-    enabled: showCreate,
+    enabled: showDialog,
   });
   const companiesList = companiesData?.data?.items ?? [];
 
@@ -119,6 +134,32 @@ export function ContactsPage() {
     setContactToDelete(contact);
   }
 
+  function openCreateDialog() {
+    setEditingContact(null);
+    setForm(initialForm);
+    setShowDialog(true);
+  }
+
+  function openEditDialog(contact: Contact) {
+    setEditingContact(contact);
+    setForm({
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      email: contact.email ?? '',
+      phone: contact.phone ?? '',
+      title: contact.title ?? '',
+      status: contact.status,
+      companyId: contact.companyId ?? '',
+    });
+    setShowDialog(true);
+  }
+
+  function closeDialog() {
+    setShowDialog(false);
+    setEditingContact(null);
+    setForm(initialForm);
+  }
+
   function handleDeleteConfirm() {
     if (!contactToDelete || deleteMutation.isPending) {
       return;
@@ -127,14 +168,21 @@ export function ContactsPage() {
     deleteMutation.mutate(contactToDelete.id);
   }
 
-  function handleCreateSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (createMutation.isPending) {
+    if (createMutation.isPending || updateMutation.isPending) {
       return;
     }
 
-    createMutation.mutate(normalizeContactPayload(form));
+    const payload = normalizeContactPayload(form);
+
+    if (editingContact) {
+      updateMutation.mutate({ id: editingContact.id, data: payload });
+      return;
+    }
+
+    createMutation.mutate(payload);
   }
 
   const desktopTable = (
@@ -200,6 +248,14 @@ export function ContactsPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => openEditDialog(contact)}
+                        className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label={`Edit ${contact.firstName} ${contact.lastName}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
                       {contact.email && (
                         <a
                           href={`mailto:${contact.email}`}
@@ -272,6 +328,15 @@ export function ContactsPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => openEditDialog(contact)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                aria-label={`Edit ${contact.firstName} ${contact.lastName}`}
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
               {contact.email && (
                 <a
                   href={`mailto:${contact.email}`}
@@ -326,7 +391,7 @@ export function ContactsPage() {
         actions={
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            onClick={openCreateDialog}
             className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
@@ -377,9 +442,20 @@ export function ContactsPage() {
         )}
       </PageShell>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Contact">
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !createMutation.isPending && !updateMutation.isPending) {
+            closeDialog();
+            return;
+          }
+
+          setShowDialog(open);
+        }}
+        title={editingContact ? 'Edit Contact' : 'New Contact'}
+      >
         <form
-          onSubmit={handleCreateSubmit}
+          onSubmit={handleSubmit}
           className="space-y-3"
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -429,9 +505,15 @@ export function ContactsPage() {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setShowCreate(false)} className="h-9 rounded-md border border-border px-4 text-sm transition-colors hover:bg-muted">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending} className="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
-              {createMutation.isPending ? 'Creating contact…' : 'Create Contact'}
+            <button type="button" onClick={closeDialog} className="h-9 rounded-md border border-border px-4 text-sm transition-colors hover:bg-muted">Cancel</button>
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+              {createMutation.isPending || updateMutation.isPending
+                ? editingContact
+                  ? 'Saving contact…'
+                  : 'Creating contact…'
+                : editingContact
+                  ? 'Save Changes'
+                  : 'Create Contact'}
             </button>
           </div>
         </form>

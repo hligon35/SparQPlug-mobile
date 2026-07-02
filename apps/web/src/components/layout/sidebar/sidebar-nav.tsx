@@ -31,13 +31,13 @@ export function SidebarNav({ collapsed = false, onNavigate }: SidebarNavProps) {
                       'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                       isActive &&
                         'bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
-                      collapsed && 'justify-center',
+                      collapsed && 'justify-center px-0 py-3',
                     )
                   }
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
                 >
-                  <item.icon className="h-4 w-4 shrink-0" />
+                  <item.icon className={cn('shrink-0', collapsed ? 'h-5 w-5' : 'h-4 w-4')} />
                   {!collapsed && <span className="truncate">{item.label}</span>}
                 </NavLink>
               </li>

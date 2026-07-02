@@ -2,7 +2,7 @@ import { Outlet } from 'react-router-dom';
 
 export function AuthLayout() {
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-background flex flex-col lg:flex-row">
       {/* Brand panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary/20 via-primary/5 to-background flex-col items-center justify-center p-12 border-r border-border">
         <div className="max-w-md text-center">
@@ -32,7 +32,7 @@ export function AuthLayout() {
       </div>
 
       {/* Auth form */}
-      <div className="flex flex-1 items-center justify-center p-8">
+      <div className="flex flex-1 items-center justify-center px-4 py-8 sm:px-6 lg:p-8">
         <div className="w-full max-w-md">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
             <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center">

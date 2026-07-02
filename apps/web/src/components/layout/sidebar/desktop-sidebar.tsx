@@ -13,7 +13,7 @@ export function DesktopSidebar() {
     <aside
       className={cn(
         'hidden min-h-dvh border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out lg:flex lg:flex-col',
-        collapsed ? 'lg:w-[72px]' : 'lg:w-[220px]',
+        collapsed ? 'lg:w-[88px]' : 'lg:w-[220px]',
       )}
     >
       <SidebarBrand

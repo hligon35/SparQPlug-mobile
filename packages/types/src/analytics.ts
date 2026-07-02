@@ -2,11 +2,12 @@
 
 export interface AnalyticsDomain {
   id: string;
-  domain: string;
   name: string;
   zoneId: string;
   status: 'active' | 'inactive';
   organizationId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AnalyticsDateRange =

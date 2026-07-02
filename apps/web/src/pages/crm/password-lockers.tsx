@@ -57,6 +57,14 @@ const EMPTY_FORM = {
   companyId: '',
 };
 
+type PasswordLockersListResponse = ApiResponse<PasswordLocker[]> & {
+  meta?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+  };
+};
+
 function serviceLabel(service: PasswordLockerService): string {
   return SERVICE_OPTIONS.find((item) => item.value === service)?.label ?? 'Other';
 }
@@ -90,10 +98,10 @@ export function PasswordLockersPage() {
   const revealTimers = useRef<Record<string, number>>({});
   const LIMIT = 20;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading } = useQuery<PasswordLockersListResponse>({
     queryKey: ['password-lockers', { search, serviceFilter, page }],
     queryFn: () =>
-      api.get<ApiResponse<PaginatedResponse<PasswordLocker>>>('/password-lockers', {
+      api.get<PasswordLockersListResponse>('/password-lockers', {
         search: search || undefined,
         service: serviceFilter || undefined,
         page,
@@ -124,9 +132,9 @@ export function PasswordLockersPage() {
     [companies],
   );
 
-  const lockers = data?.data?.items ?? [];
-  const total = data?.data?.total ?? 0;
-  const totalPages = Math.ceil(total / LIMIT);
+  const lockers = data?.data ?? [];
+  const total = data?.meta?.total ?? lockers.length;
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
   const createMutation = useMutation({
     mutationFn: (payload: typeof EMPTY_FORM) =>

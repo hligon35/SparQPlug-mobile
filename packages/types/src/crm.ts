@@ -68,6 +68,7 @@ export const CompanySchema = z.object({
   phone: z.string().optional().nullable(),
   email: z.string().email().optional().nullable(),
   website: z.string().url().optional().nullable(),
+  logoUrl: z.string().url().optional().nullable(),
   ownerId: z.string().optional().nullable(),
   status: z.enum(['active', 'inactive', 'prospect', 'customer', 'churned']).default('prospect'),
   tags: z.array(z.string()).default([]),

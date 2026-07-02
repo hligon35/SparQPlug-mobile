@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useParams, NavLink } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Building2, Users, Key, User, Server, Plus, Pencil, Trash2, ExternalLink, UserPlus } from 'lucide-react';
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { api } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/stores/auth-store';
+import { auth } from '@/lib/firebase';
 import { normalizeUrlField, prefillUrlField, sanitizeDecimalInput, sanitizeIntegerInput } from '@/lib/form-utils';
 import type { ApiResponse, Organization, TeamMember, ApiKey } from '@sparqplug/types';
 
@@ -222,6 +224,48 @@ function ApiKeysSection() {
 // ─── Profile section ──────────────────────────────────────────────────────────
 function ProfileSection() {
   const { user } = useAuthStore();
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      const currentUser = auth.currentUser;
+
+      if (!currentUser?.email) {
+        throw new Error('You must be signed in to change your password.');
+      }
+
+      if (!passwordForm.currentPassword) {
+        throw new Error('Current password is required.');
+      }
+
+      if (passwordForm.newPassword.length < 8) {
+        throw new Error('New password must be at least 8 characters.');
+      }
+
+      if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+        throw new Error('New passwords do not match.');
+      }
+
+      if (passwordForm.newPassword === passwordForm.currentPassword) {
+        throw new Error('New password must be different from the current password.');
+      }
+
+      const credential = EmailAuthProvider.credential(currentUser.email, passwordForm.currentPassword);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, passwordForm.newPassword);
+    },
+    onSuccess: () => {
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      toast({ title: 'Password updated', variant: 'success' });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update password',
+        description: error instanceof Error ? error.message : 'Try again.',
+        variant: 'destructive',
+      }),
+  });
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-foreground">Profile</h2>
@@ -234,6 +278,37 @@ function ProfileSection() {
             <p className="font-semibold text-foreground">{user?.name}</p>
             <p className="text-sm text-muted-foreground">{user?.email}</p>
             <p className="text-xs text-muted-foreground capitalize mt-0.5">{user?.role}</p>
+          </div>
+        </div>
+
+        <div className="border-t border-border pt-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Change Password</h3>
+            <p className="text-xs text-muted-foreground mt-1">Re-enter your current password before setting a new one.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-1.5 md:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Current password</label>
+              <input type="password" autoComplete="current-password" className={inputClass} value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((current) => ({ ...current, currentPassword: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">New password</label>
+              <input type="password" autoComplete="new-password" className={inputClass} value={passwordForm.newPassword} onChange={(e) => setPasswordForm((current) => ({ ...current, newPassword: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Confirm new password</label>
+              <input type="password" autoComplete="new-password" className={inputClass} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((current) => ({ ...current, confirmPassword: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => changePasswordMutation.mutate()}
+              disabled={changePasswordMutation.isPending}
+              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {changePasswordMutation.isPending ? 'Updating…' : 'Update Password'}
+            </button>
           </div>
         </div>
       </div>

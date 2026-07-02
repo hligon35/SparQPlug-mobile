@@ -92,9 +92,14 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
 
   const token = useAuthStore.getState().firebaseToken;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(init.headers as Record<string, string>),
   };
+
+  const isFormDataBody = typeof FormData !== 'undefined' && init.body instanceof FormData;
+
+  if (!isFormDataBody && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -156,13 +161,31 @@ export const api = {
       : apiFetch<T>(path, { method: 'GET' }),
 
   post: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+    apiFetch<T>(path, {
+      method: 'POST',
+      body:
+        typeof FormData !== 'undefined' && body instanceof FormData
+          ? body
+          : JSON.stringify(body),
+    }),
 
   patch: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+    apiFetch<T>(path, {
+      method: 'PATCH',
+      body:
+        typeof FormData !== 'undefined' && body instanceof FormData
+          ? body
+          : JSON.stringify(body),
+    }),
 
   put: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
+    apiFetch<T>(path, {
+      method: 'PUT',
+      body:
+        typeof FormData !== 'undefined' && body instanceof FormData
+          ? body
+          : JSON.stringify(body),
+    }),
 
   delete: <T>(path: string) =>
     apiFetch<T>(path, { method: 'DELETE' }),

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Globe, Users, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Globe, Users, Trash2, Eye, Pencil } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatRelative } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -23,14 +23,29 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function CompanyAvatar({ company, className = 'h-9 w-9 rounded-lg' }: { company: Pick<Company, 'logoUrl' | 'name'>; className?: string }) {
+  if (company.logoUrl) {
+    return <img src={company.logoUrl} alt={`${company.name} logo`} className={`${className} shrink-0 object-cover`} />;
+  }
+
+  return (
+    <div className={`flex shrink-0 items-center justify-center bg-muted ${className}`}>
+      <Users className="h-4 w-4 text-muted-foreground" />
+    </div>
+  );
+}
+
 export function CompaniesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [form, setForm] = useState<CompanyFormValues>(initialForm);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const LIMIT = 20;
 
   const { data, isLoading } = useQuery({
@@ -59,16 +74,26 @@ export function CompaniesPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: CompanyInput) => api.post('/companies', data),
+    mutationFn: (data: CompanyInput) => api.post<ApiResponse<Company>>('/companies', data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      toast({ title: 'Company created', variant: 'success' });
-      setShowCreate(false);
-      setForm(initialForm);
+      void finalizeCompanyMutation('created');
     },
     onError: (error) =>
       toast({
         title: 'Failed to create company',
+        description: getErrorMessage(error, 'Review the company details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: CompanyInput }) => api.patch<ApiResponse<Company>>(`/companies/${id}`, data),
+    onSuccess: () => {
+      void finalizeCompanyMutation('updated');
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update company',
         description: getErrorMessage(error, 'Review the company details and try again.'),
         variant: 'destructive',
       }),
@@ -79,14 +104,99 @@ export function CompaniesPage() {
   const totalPages = Math.ceil(total / LIMIT);
   const deletePendingId = deleteMutation.isPending ? deleteMutation.variables : undefined;
 
-  function handleCreateSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function uploadCompanyLogo(companyId: string) {
+    if (!logoFile) {
+      return true;
+    }
+
+    const body = new FormData();
+    body.append('logo', logoFile);
+
+    try {
+      await api.post<ApiResponse<Company>>(`/companies/${companyId}/logo`, body);
+      return true;
+    } catch (error) {
+      toast({
+        title: 'Company saved, but logo upload failed',
+        description: getErrorMessage(error, 'Try uploading the logo again from Edit Company.'),
+        variant: 'destructive',
+      });
+      return false;
+    }
+  }
+
+  function resetDialogState() {
+    setShowDialog(false);
+    setEditingCompany(null);
+    setForm(initialForm);
+    setLogoFile(null);
+    if (logoInputRef.current) {
+      logoInputRef.current.value = '';
+    }
+  }
+
+  async function finalizeCompanyMutation(action: 'created' | 'updated') {
+    const companyId = editingCompany?.id ?? createMutation.data?.data?.id ?? updateMutation.data?.data?.id;
+    const logoUploaded = companyId ? await uploadCompanyLogo(companyId) : true;
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['companies'] }),
+      queryClient.invalidateQueries({ queryKey: ['companies-list'] }),
+    ]);
+
+    toast(
+      logoFile && !logoUploaded
+        ? {
+            title: `Company ${action}`,
+            description: 'Company details were saved without updating the logo.',
+            variant: 'success',
+          }
+        : {
+            title: `Company ${action}`,
+            variant: 'success',
+          },
+    );
+
+    resetDialogState();
+  }
+
+  function openCreateDialog() {
+    setEditingCompany(null);
+    setForm(initialForm);
+    setLogoFile(null);
+    setShowDialog(true);
+  }
+
+  function openEditDialog(company: Company) {
+    setEditingCompany(company);
+    setForm({
+      name: company.name,
+      industry: company.industry ?? '',
+      website: company.website ?? '',
+      size: (company.size ?? '') as CompanyFormValues['size'],
+    });
+    setLogoFile(null);
+    if (logoInputRef.current) {
+      logoInputRef.current.value = '';
+    }
+    setShowDialog(true);
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (createMutation.isPending) {
+    if (createMutation.isPending || updateMutation.isPending) {
       return;
     }
 
-    createMutation.mutate(normalizeCompanyPayload(form));
+    const payload = normalizeCompanyPayload(form, editingCompany?.status ?? 'prospect');
+
+    if (editingCompany) {
+      updateMutation.mutate({ id: editingCompany.id, data: payload });
+      return;
+    }
+
+    createMutation.mutate(payload);
   }
 
   function handleDeleteConfirm() {
@@ -135,7 +245,7 @@ export function CompaniesPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <CompanyAvatar company={company} className="h-9 w-9 rounded-lg" />
                       </div>
                       <span className="max-w-[180px] truncate font-medium text-foreground">{company.name}</span>
                     </div>
@@ -160,6 +270,14 @@ export function CompaniesPage() {
                   <td className="hidden px-4 py-3 text-xs text-muted-foreground xl:table-cell">{formatRelative(company.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => openEditDialog(company)}
+                        className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label={`Edit ${company.name}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => navigate(`/crm/companies/${company.id}`)}
@@ -208,9 +326,12 @@ export function CompaniesPage() {
         companies.map((company) => (
           <article key={company.id} className="space-y-4 rounded-lg border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <h2 className="truncate text-base font-semibold text-foreground">{company.name}</h2>
-                <p className="text-xs text-muted-foreground">Added {formatRelative(company.createdAt)}</p>
+              <div className="flex min-w-0 items-start gap-3">
+                <CompanyAvatar company={company} className="h-10 w-10 rounded-xl" />
+                <div className="min-w-0 space-y-1">
+                  <h2 className="truncate text-base font-semibold text-foreground">{company.name}</h2>
+                  <p className="text-xs text-muted-foreground">Added {formatRelative(company.createdAt)}</p>
+                </div>
               </div>
             </div>
 
@@ -231,6 +352,15 @@ export function CompaniesPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => openEditDialog(company)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                aria-label={`Edit ${company.name}`}
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
               <button
                 type="button"
                 onClick={() => navigate(`/crm/companies/${company.id}`)}
@@ -277,7 +407,7 @@ export function CompaniesPage() {
         actions={
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            onClick={openCreateDialog}
             className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
@@ -312,9 +442,20 @@ export function CompaniesPage() {
         )}
       </PageShell>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Company">
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !createMutation.isPending && !updateMutation.isPending) {
+            resetDialogState();
+            return;
+          }
+
+          setShowDialog(open);
+        }}
+        title={editingCompany ? 'Edit Company' : 'New Company'}
+      >
         <form
-          onSubmit={handleCreateSubmit}
+          onSubmit={handleSubmit}
           className="space-y-3"
         >
           <div className="space-y-1.5">
@@ -341,10 +482,37 @@ export function CompaniesPage() {
             <label className="text-xs font-medium text-muted-foreground">Website</label>
             <input type="url" className={inputClass} value={form.website} onFocus={() => setForm((f) => ({ ...f, website: prefillUrlField(f.website) }))} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} placeholder="https://acme.com" />
           </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Company logo</label>
+            <input
+              ref={logoInputRef}
+              id="company-logo-upload"
+              aria-label="Company logo"
+              title="Upload company logo"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm file:font-medium`}
+              onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+            />
+            <p className="text-xs text-muted-foreground">PNG, JPG, WEBP, or SVG up to 5MB.</p>
+            {editingCompany?.logoUrl && !logoFile ? (
+              <div className="flex items-center gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+                <CompanyAvatar company={editingCompany} className="h-10 w-10 rounded-lg" />
+                <p className="text-xs text-muted-foreground">Current logo will be kept unless you choose a new file.</p>
+              </div>
+            ) : null}
+            {logoFile ? <p className="text-xs text-muted-foreground">Selected: {logoFile.name}</p> : null}
+          </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {createMutation.isPending ? 'Creating company…' : 'Create Company'}
+            <button type="button" onClick={resetDialogState} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+              {createMutation.isPending || updateMutation.isPending
+                ? editingCompany
+                  ? 'Saving company…'
+                  : 'Creating company…'
+                : editingCompany
+                  ? 'Save Changes'
+                  : 'Create Company'}
             </button>
           </div>
         </form>

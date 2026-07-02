@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, TrendingUp } from 'lucide-react';
+import { Plus, TrendingUp, Pencil } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatCurrency, formatRelative, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -35,6 +35,18 @@ const STAGE_PROBABILITIES: Record<OpportunityStage, string> = {
 const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const initialForm: OpportunityFormValues = { name: '', stage: 'prospecting', value: '', probability: STAGE_PROBABILITIES['prospecting'], expectedCloseDate: '', companyId: '', contactId: '' };
 
+function toEditableStage(stage: OpportunityStage): OpportunityFormValues['stage'] {
+  if (stage === 'lead') {
+    return 'prospecting';
+  }
+
+  if (stage === 'qualified') {
+    return 'qualification';
+  }
+
+  return stage;
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof ApiError || error instanceof Error) {
     return error.message;
@@ -47,7 +59,8 @@ export function OpportunitiesPage() {
   const queryClient = useQueryClient();
   const [stage, setStage] = useState<OpportunityStage | ''>('');
   const [page, setPage] = useState(1);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingOpportunity, setEditingOpportunity] = useState<Opportunity | null>(null);
   const [form, setForm] = useState<OpportunityFormValues>(initialForm);
   const LIMIT = 20;
 
@@ -70,8 +83,7 @@ export function OpportunitiesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opportunities'] });
       toast({ title: 'Opportunity created', variant: 'success' });
-      setShowCreate(false);
-      setForm(initialForm);
+      closeDialog();
     },
     onError: (error) =>
       toast({
@@ -81,18 +93,61 @@ export function OpportunitiesPage() {
       }),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: OpportunityFormValues }) =>
+      api.patch(`/opportunities/${id}`, normalizeOpportunityPayload(data)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['opportunities'] });
+      toast({ title: 'Opportunity updated', variant: 'success' });
+      closeDialog();
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update opportunity',
+        description: getErrorMessage(error, 'Review the opportunity fields and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
   const { data: companiesData } = useQuery({
     queryKey: ['companies-list'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Company>>>('/companies', { limit: 200 }),
-    enabled: showCreate,
+    enabled: showDialog,
   });
   const { data: contactsData } = useQuery({
     queryKey: ['contacts-list'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<Contact>>>('/contacts', { limit: 200 }),
-    enabled: showCreate,
+    enabled: showDialog,
   });
   const companiesList = companiesData?.data?.items ?? [];
   const contactsList = contactsData?.data?.items ?? [];
+
+  function openCreateDialog() {
+    setEditingOpportunity(null);
+    setForm(initialForm);
+    setShowDialog(true);
+  }
+
+  function openEditDialog(opportunity: Opportunity) {
+    setEditingOpportunity(opportunity);
+    const editableStage = toEditableStage(opportunity.stage);
+    setForm({
+      name: opportunity.name,
+      stage: editableStage,
+      value: opportunity.value != null ? String(opportunity.value) : '',
+      probability: opportunity.probability != null ? String(opportunity.probability) : STAGE_PROBABILITIES[editableStage],
+      expectedCloseDate: opportunity.closeDate ? opportunity.closeDate.slice(0, 10) : '',
+      companyId: opportunity.companyId ?? '',
+      contactId: opportunity.contactId ?? '',
+    });
+    setShowDialog(true);
+  }
+
+  function closeDialog() {
+    setShowDialog(false);
+    setEditingOpportunity(null);
+    setForm(initialForm);
+  }
 
   return (
     <div className="p-6 space-y-4 max-w-7xl mx-auto">
@@ -101,7 +156,7 @@ export function OpportunitiesPage() {
           <h1 className="text-xl font-semibold text-foreground">Opportunities</h1>
           <p className="text-sm text-muted-foreground">{total} total</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+        <button onClick={openCreateDialog} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" />
           New Opportunity
         </button>
@@ -135,19 +190,20 @@ export function OpportunitiesPage() {
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">Value</th>
               <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Probability</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Close Date</th>
+              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i}>
-                  {Array.from({ length: 5 }).map((_, j) => (
+                  {Array.from({ length: 6 }).map((_, j) => (
                     <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-3/4" /></td>
                   ))}
                 </tr>
               ))
             ) : opps.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No opportunities found</td></tr>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">No opportunities found</td></tr>
             ) : (
               opps.map((opp) => (
                 <tr key={opp.id} className="hover:bg-muted/30 transition-colors">
@@ -171,6 +227,16 @@ export function OpportunitiesPage() {
                   <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
                     {opp.closeDate ? formatRelative(opp.closeDate) : '—'}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openEditDialog(opp)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label={`Edit ${opp.name}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
@@ -187,8 +253,34 @@ export function OpportunitiesPage() {
         )}
       </div>
 
-      <Dialog open={showCreate} onOpenChange={setShowCreate} title="New Opportunity">
-        <form onSubmit={(e) => { e.preventDefault(); if (!createMutation.isPending) createMutation.mutate(form); }} className="space-y-3">
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !createMutation.isPending && !updateMutation.isPending) {
+            closeDialog();
+            return;
+          }
+
+          setShowDialog(open);
+        }}
+        title={editingOpportunity ? 'Edit Opportunity' : 'New Opportunity'}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (createMutation.isPending || updateMutation.isPending) {
+              return;
+            }
+
+            if (editingOpportunity) {
+              updateMutation.mutate({ id: editingOpportunity.id, data: form });
+              return;
+            }
+
+            createMutation.mutate(form);
+          }}
+          className="space-y-3"
+        >
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name *</label>
             <input required autoFocus className={inputClass} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Enterprise deal" />
@@ -235,9 +327,15 @@ export function OpportunitiesPage() {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {createMutation.isPending ? 'Creating…' : 'Create Opportunity'}
+            <button type="button" onClick={closeDialog} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+            <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+              {createMutation.isPending || updateMutation.isPending
+                ? editingOpportunity
+                  ? 'Saving…'
+                  : 'Creating…'
+                : editingOpportunity
+                  ? 'Save Changes'
+                  : 'Create Opportunity'}
             </button>
           </div>
         </form>

@@ -5,12 +5,24 @@ import type { Bindings, Variables } from '../index';
 import { createDb } from '../db';
 import { companies } from '../db/schema';
 import { authMiddleware } from '../middleware/auth';
+import type { Context } from 'hono';
 import { CompanySchema } from '@sparqplug/types';
 import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
 
 export const companiesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
-companiesRouter.use('*', authMiddleware);
+
+const MAX_COMPANY_LOGO_SIZE = 5 * 1024 * 1024;
+const ACCEPTED_COMPANY_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+
+function getCompanyLogoStorageKey(organizationId: string, companyId: string) {
+  return `company-logos/${organizationId}/${companyId}`;
+}
+
+function buildCompanyLogoUrl(c: Context<{ Bindings: Bindings; Variables: Variables }>, companyId: string) {
+  const requestUrl = new URL(c.req.url);
+  return `${requestUrl.origin}/api/v1/companies/${companyId}/logo?v=${Date.now()}`;
+}
 
 companiesRouter.get(
   '/',
@@ -66,6 +78,31 @@ companiesRouter.get('/:id', async (c) => {
   return c.json({ success: true, data: company });
 });
 
+companiesRouter.get('/:id/logo', async (c) => {
+  const db = createDb(c.env.DB);
+
+  const company = await db.query.companies.findFirst({
+    where: eq(companies.id, c.req.param('id')),
+  });
+
+  if (!company?.logoUrl) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found' } }, 404);
+  }
+
+  const object = await c.env.STORAGE.get(getCompanyLogoStorageKey(company.organizationId, company.id));
+  if (!object) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found in storage' } }, 404);
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('Cache-Control', 'public, max-age=300');
+
+  return new Response(object.body, { headers });
+});
+
+companiesRouter.use('*', authMiddleware);
+
 companiesRouter.post('/', zValidator('json', CompanySchema), async (c) => {
   const orgId = c.get('organizationId');
   const userId = c.get('userId');
@@ -76,6 +113,46 @@ companiesRouter.post('/', zValidator('json', CompanySchema), async (c) => {
   await db.insert(companies).values({ id, organizationId: orgId, ownerId: userId, ...data });
   const company = await db.query.companies.findFirst({ where: eq(companies.id, id) });
   return c.json({ success: true, data: company }, 201);
+});
+
+companiesRouter.post('/:id/logo', async (c) => {
+  const orgId = c.get('organizationId');
+  const db = createDb(c.env.DB);
+
+  const company = await db.query.companies.findFirst({
+    where: and(eq(companies.id, c.req.param('id')), eq(companies.organizationId, orgId)),
+  });
+
+  if (!company) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company not found' } }, 404);
+  }
+
+  const body = await c.req.parseBody();
+  const logo = body['logo'];
+
+  if (!(logo instanceof File)) {
+    return c.json({ success: false, error: { code: 'BAD_REQUEST', message: 'Logo file is required' } }, 400);
+  }
+
+  if (!ACCEPTED_COMPANY_LOGO_TYPES.has(logo.type)) {
+    return c.json({ success: false, error: { code: 'BAD_REQUEST', message: 'Logo must be PNG, JPG, WEBP, or SVG' } }, 400);
+  }
+
+  if (logo.size > MAX_COMPANY_LOGO_SIZE) {
+    return c.json({ success: false, error: { code: 'BAD_REQUEST', message: 'Logo must be 5MB or smaller' } }, 400);
+  }
+
+  const logoStorageKey = getCompanyLogoStorageKey(orgId, company.id);
+  await c.env.STORAGE.put(logoStorageKey, await logo.arrayBuffer(), {
+    httpMetadata: {
+      contentType: logo.type,
+    },
+  });
+
+  const logoUrl = buildCompanyLogoUrl(c, company.id);
+  await db.update(companies).set({ logoUrl, updatedAt: new Date().toISOString() }).where(eq(companies.id, company.id));
+  const updated = await db.query.companies.findFirst({ where: eq(companies.id, company.id) });
+  return c.json({ success: true, data: updated });
 });
 
 companiesRouter.patch('/:id', zValidator('json', CompanySchema.partial()), async (c) => {
@@ -109,5 +186,6 @@ companiesRouter.delete('/:id', async (c) => {
   }
 
   await db.delete(companies).where(eq(companies.id, c.req.param('id')));
+  await c.env.STORAGE.delete(getCompanyLogoStorageKey(orgId, c.req.param('id')));
   return c.json({ success: true, data: { id: c.req.param('id') } });
 });
