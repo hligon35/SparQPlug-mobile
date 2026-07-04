@@ -14,19 +14,15 @@ export const billingRouter = new Hono<{ Bindings: Bindings; Variables: Variables
 billingRouter.use('*', authMiddleware);
 
 const SYNC_RESOURCES = ['customers', 'invoices', 'subscriptions'] as const;
-const SyncBillingSchema = z.object({
-  resources: z.array(z.enum(SYNC_RESOURCES)).optional(),
-});
+const SyncBillingSchema = z.object({ resources: z.array(z.enum(SYNC_RESOURCES)).optional() });
+const BillingLabelSchema = z.object({ label: z.string().trim().max(160).optional().nullable() });
 
 function getStripe(secretKey: string) {
   return new Stripe(secretKey, { apiVersion: '2024-06-20' });
 }
 
 function serializeMetadata(metadata: Stripe.Metadata | null | undefined) {
-  if (!metadata) {
-    return {};
-  }
-
+  if (!metadata) return {};
   return Object.fromEntries(
     Object.entries(metadata).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0),
   );
@@ -72,36 +68,22 @@ function mapSubscriptionStatus(status: Stripe.Subscription.Status): 'active' | '
 
 function getSubscriptionPlanName(subscription: Stripe.Subscription) {
   const firstItem = subscription.items.data[0];
-  if (!firstItem) {
-    return 'Stripe Subscription';
-  }
-
+  if (!firstItem) return 'Stripe Subscription';
   const nickname = firstItem.price.nickname?.trim();
-  if (nickname) {
-    return nickname;
-  }
-
+  if (nickname) return nickname;
   return firstItem.price.id;
 }
 
 function getSubscriptionInterval(subscription: Stripe.Subscription): 'month' | 'year' | 'week' | 'day' {
   const interval = subscription.items.data[0]?.price.recurring?.interval;
-  if (interval === 'month' || interval === 'year' || interval === 'week' || interval === 'day') {
-    return interval;
-  }
-
+  if (interval === 'month' || interval === 'year' || interval === 'week' || interval === 'day') return interval;
   return 'month';
 }
 
 async function syncCustomerRecord(db: ReturnType<typeof createDb>, organizationId: string, customer: Stripe.Customer) {
-  if (customer.deleted || !shouldSyncOrganization(customer.metadata, organizationId)) {
-    return null;
-  }
+  if (customer.deleted || !shouldSyncOrganization(customer.metadata, organizationId)) return null;
 
-  const existingCustomer = await db.query.stripeCustomers.findFirst({
-    where: eq(stripeCustomers.stripeCustomerId, customer.id),
-  });
-
+  const existingCustomer = await db.query.stripeCustomers.findFirst({ where: eq(stripeCustomers.stripeCustomerId, customer.id) });
   const metadata = serializeMetadata(customer.metadata);
   const values = {
     organizationId,
@@ -129,53 +111,32 @@ async function syncCustomerRecord(db: ReturnType<typeof createDb>, organizationI
 }
 
 async function ensureCustomerRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, customerRef: string | Stripe.Customer | Stripe.DeletedCustomer | null) {
-  if (!customerRef) {
-    return null;
-  }
-
+  if (!customerRef) return null;
   const stripeCustomerId = typeof customerRef === 'string' ? customerRef : customerRef.id;
   const existingCustomer = await db.query.stripeCustomers.findFirst({
     where: and(eq(stripeCustomers.organizationId, organizationId), eq(stripeCustomers.stripeCustomerId, stripeCustomerId)),
   });
-
-  if (existingCustomer) {
-    return existingCustomer;
-  }
+  if (existingCustomer) return existingCustomer;
 
   const hydratedCustomer = typeof customerRef === 'string' ? await stripe.customers.retrieve(customerRef) : customerRef;
-  if ('deleted' in hydratedCustomer && hydratedCustomer.deleted) {
-    return null;
-  }
+  if ('deleted' in hydratedCustomer && hydratedCustomer.deleted) return null;
 
   const syncedCustomerId = await syncCustomerRecord(db, organizationId, hydratedCustomer);
-  if (!syncedCustomerId) {
-    return null;
-  }
-
-  return db.query.stripeCustomers.findFirst({
-    where: and(eq(stripeCustomers.organizationId, organizationId), eq(stripeCustomers.id, syncedCustomerId)),
-  });
+  if (!syncedCustomerId) return null;
+  return db.query.stripeCustomers.findFirst({ where: and(eq(stripeCustomers.organizationId, organizationId), eq(stripeCustomers.id, syncedCustomerId)) });
 }
 
 async function syncInvoiceRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, invoice: Stripe.Invoice) {
-  if (!shouldSyncOrganization(invoice.metadata, organizationId)) {
-    return null;
-  }
-
+  if (!shouldSyncOrganization(invoice.metadata, organizationId)) return null;
   const customer = await ensureCustomerRecord(db, stripe, organizationId, invoice.customer);
-  if (!customer) {
-    return null;
-  }
+  if (!customer) return null;
 
-  const existingInvoice = await db.query.stripeInvoices.findFirst({
-    where: eq(stripeInvoices.stripeInvoiceId, invoice.id),
-  });
-
+  const existingInvoice = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.stripeInvoiceId, invoice.id) });
   const lineItems = (invoice.lines?.data ?? []).map((line) => ({
     id: line.id,
     description: line.description ?? 'Stripe line item',
     quantity: line.quantity ?? 1,
-    unitAmount: ((line.price?.unit_amount ?? line.amount ?? 0) / 100),
+    unitAmount: (line.price?.unit_amount ?? line.amount ?? 0) / 100,
     amount: (line.amount ?? 0) / 100,
     currency: line.currency ?? invoice.currency ?? customer.currency,
   }));
@@ -185,6 +146,8 @@ async function syncInvoiceRecord(db: ReturnType<typeof createDb>, stripe: Stripe
     stripeInvoiceId: invoice.id,
     customerId: customer.id,
     status: mapInvoiceStatus(invoice.status),
+    // Use Stripe's invoice number when available. If Stripe has not assigned one yet,
+    // preserve the local label edited inside SparQPlug.
     number: invoice.number ?? existingInvoice?.number ?? null,
     currency: invoice.currency ?? existingInvoice?.currency ?? customer.currency,
     subtotal: invoice.subtotal ?? existingInvoice?.subtotal ?? 0,
@@ -214,26 +177,19 @@ async function syncInvoiceRecord(db: ReturnType<typeof createDb>, stripe: Stripe
 }
 
 async function syncSubscriptionRecord(db: ReturnType<typeof createDb>, stripe: Stripe, organizationId: string, subscription: Stripe.Subscription) {
-  if (!shouldSyncOrganization(subscription.metadata, organizationId)) {
-    return null;
-  }
-
+  if (!shouldSyncOrganization(subscription.metadata, organizationId)) return null;
   const customer = await ensureCustomerRecord(db, stripe, organizationId, subscription.customer);
-  if (!customer) {
-    return null;
-  }
+  if (!customer) return null;
 
-  const existingSubscription = await db.query.stripeSubscriptions.findFirst({
-    where: eq(stripeSubscriptions.stripeSubscriptionId, subscription.id),
-  });
+  const existingSubscription = await db.query.stripeSubscriptions.findFirst({ where: eq(stripeSubscriptions.stripeSubscriptionId, subscription.id) });
   const firstItem = subscription.items.data[0];
-
   const values = {
     organizationId,
     stripeSubscriptionId: subscription.id,
     customerId: customer.id,
     status: mapSubscriptionStatus(subscription.status),
-    planName: getSubscriptionPlanName(subscription),
+    // Preserve local label edits over Stripe price nicknames once synced.
+    planName: existingSubscription?.planName ?? getSubscriptionPlanName(subscription),
     planId: firstItem?.price.id ?? existingSubscription?.planId ?? subscription.id,
     quantity: firstItem?.quantity ?? existingSubscription?.quantity ?? 1,
     currency: firstItem?.price.currency ?? existingSubscription?.currency ?? customer.currency,
@@ -266,47 +222,32 @@ billingRouter.post('/sync', zValidator('json', SyncBillingSchema), async (c) => 
   const selectedResources = resources?.length ? resources : [...SYNC_RESOURCES];
   const db = createDb(c.env.DB);
   const stripe = getStripe(c.env.STRIPE_SECRET_KEY);
-  const synced = {
-    customers: 0,
-    invoices: 0,
-    subscriptions: 0,
-  };
+  const synced = { customers: 0, invoices: 0, subscriptions: 0 };
 
   if (selectedResources.includes('customers')) {
     for await (const customer of stripe.customers.list({ limit: 100 })) {
-      if (customer.deleted) {
-        continue;
-      }
-
+      if (customer.deleted) continue;
       const syncedCustomerId = await syncCustomerRecord(db, organizationId, customer);
-      if (syncedCustomerId) {
-        synced.customers += 1;
-      }
+      if (syncedCustomerId) synced.customers += 1;
     }
   }
 
   if (selectedResources.includes('invoices')) {
     for await (const invoice of stripe.invoices.list({ limit: 100 })) {
       const syncedInvoiceId = await syncInvoiceRecord(db, stripe, organizationId, invoice);
-      if (syncedInvoiceId) {
-        synced.invoices += 1;
-      }
+      if (syncedInvoiceId) synced.invoices += 1;
     }
   }
 
   if (selectedResources.includes('subscriptions')) {
     for await (const subscription of stripe.subscriptions.list({ status: 'all', limit: 100 })) {
       const syncedSubscriptionId = await syncSubscriptionRecord(db, stripe, organizationId, subscription);
-      if (syncedSubscriptionId) {
-        synced.subscriptions += 1;
-      }
+      if (syncedSubscriptionId) synced.subscriptions += 1;
     }
   }
 
   return c.json({ success: true, data: { synced } });
 });
-
-// ─── Customers ────────────────────────────────────────────────────────────────
 
 billingRouter.get('/customers', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), search: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
@@ -351,8 +292,6 @@ billingRouter.post('/customers', zValidator('json', z.object({ email: z.string()
   return c.json({ success: true, data: customer }, 201);
 });
 
-// ─── Invoices ─────────────────────────────────────────────────────────────────
-
 billingRouter.get('/invoices', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), status: z.enum(['draft', 'open', 'paid', 'void', 'uncollectible']).optional(), customerId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status, customerId } = c.req.valid('query');
@@ -382,11 +321,7 @@ billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (
     currency: data.currency,
     due_date: data.dueDate ? Math.floor(new Date(data.dueDate).getTime() / 1000) : undefined,
     auto_advance: data.autoSend,
-    metadata: {
-      organizationId: orgId,
-      source: 'sparqplug',
-      localCustomerId: customer.id,
-    },
+    metadata: { organizationId: orgId, source: 'sparqplug', localCustomerId: customer.id },
   });
 
   for (const item of data.lineItems) {
@@ -395,10 +330,23 @@ billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (
 
   const id = generateId();
   const total = data.lineItems.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
-  await db.insert(stripeInvoices).values({ id, organizationId: orgId, stripeInvoiceId: stripeInvoice.id, customerId: data.customerId, status: 'draft', currency: data.currency, subtotal: Math.round(total * 100), tax: 0, discount: 0, total: Math.round(total * 100), amountPaid: 0, amountDue: Math.round(total * 100), lineItems: data.lineItems, dueDate: data.dueDate, hostedUrl: stripeInvoice.hosted_invoice_url });
+  await db.insert(stripeInvoices).values({ id, organizationId: orgId, stripeInvoiceId: stripeInvoice.id, customerId: data.customerId, status: 'draft', number: data.notes ?? null, currency: data.currency, subtotal: Math.round(total * 100), tax: 0, discount: 0, total: Math.round(total * 100), amountPaid: 0, amountDue: Math.round(total * 100), lineItems: data.lineItems, dueDate: data.dueDate, hostedUrl: stripeInvoice.hosted_invoice_url });
 
   const invoice = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, id) });
   return c.json({ success: true, data: invoice }, 201);
+});
+
+billingRouter.patch('/invoices/:id', zValidator('json', BillingLabelSchema), async (c) => {
+  const orgId = c.get('organizationId');
+  const { label } = c.req.valid('json');
+  const db = createDb(c.env.DB);
+  const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
+  if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
+
+  const trimmedLabel = label?.trim() || null;
+  await db.update(stripeInvoices).set({ number: trimmedLabel, updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, invoice.id));
+  const updated = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, invoice.id), with: { customer: true } });
+  return c.json({ success: true, data: updated });
 });
 
 billingRouter.post('/invoices/:id/send', async (c) => {
@@ -423,8 +371,6 @@ billingRouter.post('/invoices/:id/void', async (c) => {
   return c.json({ success: true, data: { id: c.req.param('id'), status: 'void' } });
 });
 
-// ─── Subscriptions ────────────────────────────────────────────────────────────
-
 billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerce.number().default(1), limit: z.coerce.number().max(200).default(25), status: z.enum(['active', 'trialing', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'unpaid', 'paused']).optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { page, limit, status } = c.req.valid('query');
@@ -439,29 +385,29 @@ billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerc
   return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0) });
 });
 
-// ─── Revenue Metrics ──────────────────────────────────────────────────────────
+billingRouter.patch('/subscriptions/:id', zValidator('json', BillingLabelSchema), async (c) => {
+  const orgId = c.get('organizationId');
+  const { label } = c.req.valid('json');
+  const db = createDb(c.env.DB);
+  const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, c.req.param('id')), eq(stripeSubscriptions.organizationId, orgId)) });
+  if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
+
+  const trimmedLabel = label?.trim() || subscription.planId;
+  await db.update(stripeSubscriptions).set({ planName: trimmedLabel, updatedAt: new Date().toISOString() }).where(eq(stripeSubscriptions.id, subscription.id));
+  const updated = await db.query.stripeSubscriptions.findFirst({ where: eq(stripeSubscriptions.id, subscription.id), with: { customer: true } });
+  return c.json({ success: true, data: updated });
+});
 
 billingRouter.get('/metrics', async (c) => {
   const orgId = c.get('organizationId');
   const db = createDb(c.env.DB);
-
   const [activeSubsResult, trialingResult, pastDueResult] = await Promise.all([
     db.select({ count: sql<number>`count(*)`, total: sql<number>`sum(amount)` }).from(stripeSubscriptions).where(and(eq(stripeSubscriptions.organizationId, orgId), eq(stripeSubscriptions.status, 'active'))),
     db.select({ count: sql<number>`count(*)` }).from(stripeSubscriptions).where(and(eq(stripeSubscriptions.organizationId, orgId), eq(stripeSubscriptions.status, 'trialing'))),
     db.select({ count: sql<number>`count(*)` }).from(stripeSubscriptions).where(and(eq(stripeSubscriptions.organizationId, orgId), eq(stripeSubscriptions.status, 'past_due'))),
   ]);
-
   const mrr = (activeSubsResult[0]?.total ?? 0) / 100;
-  return c.json({
-    success: true,
-    data: {
-      mrr,
-      arr: mrr * 12,
-      activeSubscriptions: activeSubsResult[0]?.count ?? 0,
-      trialingSubscriptions: trialingResult[0]?.count ?? 0,
-      pastDueSubscriptions: pastDueResult[0]?.count ?? 0,
-    },
-  });
+  return c.json({ success: true, data: { mrr, arr: mrr * 12, activeSubscriptions: activeSubsResult[0]?.count ?? 0, trialingSubscriptions: trialingResult[0]?.count ?? 0, pastDueSubscriptions: pastDueResult[0]?.count ?? 0 } });
 });
 
 billingRouter.get('/revenue-metrics', async (c) => {
