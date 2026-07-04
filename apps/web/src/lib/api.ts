@@ -22,11 +22,13 @@ interface FetchOptions extends RequestInit {
 }
 
 interface ApiErrorPayload {
+  message?: string;
   error?:
     | string
     | {
         message?: string;
         code?: string;
+        issues?: Array<{ message?: string; path?: Array<string | number> }>;
       };
 }
 
@@ -62,15 +64,23 @@ async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   }
 }
 
-function getApiErrorDetails(payload: ApiErrorPayload | null) {
+function getApiErrorDetails(payload: ApiErrorPayload | null, status: number) {
   const nestedError = payload?.error;
 
   if (typeof nestedError === 'string') {
     return { message: nestedError, code: undefined };
   }
 
+  const firstIssue = nestedError?.issues?.find((issue) => issue.message);
+  const issuePath = firstIssue?.path?.join('.');
+  const issueMessage = firstIssue?.message
+    ? issuePath
+      ? `${issuePath}: ${firstIssue.message}`
+      : firstIssue.message
+    : undefined;
+
   return {
-    message: nestedError?.message ?? 'Request failed',
+    message: nestedError?.message ?? issueMessage ?? payload?.message ?? `Request failed with HTTP ${status}`,
     code: nestedError?.code,
   };
 }
@@ -123,7 +133,7 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
         redirectToLogin();
       }
 
-      const errorDetails = getApiErrorDetails(payload);
+      const errorDetails = getApiErrorDetails(payload, response.status);
       throw new ApiError(errorDetails.message, response.status, errorDetails.code);
     }
 
