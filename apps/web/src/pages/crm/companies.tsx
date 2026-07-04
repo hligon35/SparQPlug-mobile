@@ -16,10 +16,7 @@ const inputClass = 'flex h-9 w-full rounded-md border border-input bg-background
 const initialForm: CompanyFormValues = { name: '', industry: '', website: '', size: '' };
 
 function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiError || error instanceof Error) {
-    return error.message;
-  }
-
+  if (error instanceof ApiError || error instanceof Error) return error.message;
   return fallback;
 }
 
@@ -48,7 +45,7 @@ export function CompaniesPage() {
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const LIMIT = 20;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['companies', { search, page }],
     queryFn: () =>
       api.get<ApiResponse<PaginatedResponse<Company>>>('/companies', {
@@ -58,56 +55,20 @@ export function CompaniesPage() {
       }),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/companies/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['companies'] });
-      toast({ title: 'Company deleted', variant: 'success' });
-      setCompanyToDelete(null);
-    },
-    onError: (error) =>
-      toast({
-        title: 'Failed to delete company',
-        description: getErrorMessage(error, 'The company could not be deleted.'),
-        variant: 'destructive',
-      }),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data: CompanyInput) => api.post<ApiResponse<Company>>('/companies', data),
-    onSuccess: () => {
-      void finalizeCompanyMutation('created');
-    },
-    onError: (error) =>
-      toast({
-        title: 'Failed to create company',
-        description: getErrorMessage(error, 'Review the company details and try again.'),
-        variant: 'destructive',
-      }),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: CompanyInput }) => api.patch<ApiResponse<Company>>(`/companies/${id}`, data),
-    onSuccess: () => {
-      void finalizeCompanyMutation('updated');
-    },
-    onError: (error) =>
-      toast({
-        title: 'Failed to update company',
-        description: getErrorMessage(error, 'Review the company details and try again.'),
-        variant: 'destructive',
-      }),
-  });
-
   const companies = data?.data?.items ?? [];
   const total = data?.data?.total ?? 0;
   const totalPages = Math.ceil(total / LIMIT);
-  const deletePendingId = deleteMutation.isPending ? deleteMutation.variables : undefined;
+
+  async function refreshCompanyQueries() {
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({ queryKey: ['companies'] }),
+      queryClient.invalidateQueries({ queryKey: ['companies-list'] }),
+    ]);
+  }
 
   async function uploadCompanyLogo(companyId: string) {
-    if (!logoFile) {
-      return true;
-    }
+    if (!logoFile) return true;
 
     const body = new FormData();
     body.append('logo', logoFile);
@@ -130,40 +91,72 @@ export function CompaniesPage() {
     setEditingCompany(null);
     setForm(initialForm);
     setLogoFile(null);
-    if (logoInputRef.current) {
-      logoInputRef.current.value = '';
-    }
+    if (logoInputRef.current) logoInputRef.current.value = '';
   }
 
-  async function finalizeCompanyMutation(action: 'created' | 'updated') {
-    const companyId = editingCompany?.id ?? createMutation.data?.data?.id ?? updateMutation.data?.data?.id;
+  async function finalizeCompanySave(company: Company | undefined, action: 'created' | 'updated') {
+    const companyId = company?.id ?? editingCompany?.id;
     const logoUploaded = companyId ? await uploadCompanyLogo(companyId) : true;
 
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['companies'] }),
-      queryClient.invalidateQueries({ queryKey: ['companies-list'] }),
-    ]);
+    await refreshCompanyQueries();
 
     toast(
       logoFile && !logoUploaded
-        ? {
-            title: `Company ${action}`,
-            description: 'Company details were saved without updating the logo.',
-            variant: 'success',
-          }
-        : {
-            title: `Company ${action}`,
-            variant: 'success',
-          },
+        ? { title: `Company ${action}`, description: 'Company details were saved without updating the logo.', variant: 'success' }
+        : { title: `Company ${action}`, variant: 'success' },
     );
 
     resetDialogState();
   }
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/companies/${id}`),
+    onSuccess: async () => {
+      await refreshCompanyQueries();
+      toast({ title: 'Company deleted', variant: 'success' });
+      setCompanyToDelete(null);
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to delete company',
+        description: getErrorMessage(error, 'The company could not be deleted.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: CompanyInput) => api.post<ApiResponse<Company>>('/companies', data),
+    onSuccess: (response) => {
+      void finalizeCompanySave(response.data, 'created');
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to create company',
+        description: getErrorMessage(error, 'Review the company details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: CompanyInput }) => api.patch<ApiResponse<Company>>(`/companies/${id}`, data),
+    onSuccess: (response) => {
+      void finalizeCompanySave(response.data, 'updated');
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to update company',
+        description: getErrorMessage(error, 'Review the company details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const deletePendingId = deleteMutation.isPending ? deleteMutation.variables : undefined;
+
   function openCreateDialog() {
     setEditingCompany(null);
     setForm(initialForm);
     setLogoFile(null);
+    if (logoInputRef.current) logoInputRef.current.value = '';
     setShowDialog(true);
   }
 
@@ -176,21 +169,15 @@ export function CompaniesPage() {
       size: (company.size ?? '') as CompanyFormValues['size'],
     });
     setLogoFile(null);
-    if (logoInputRef.current) {
-      logoInputRef.current.value = '';
-    }
+    if (logoInputRef.current) logoInputRef.current.value = '';
     setShowDialog(true);
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (createMutation.isPending || updateMutation.isPending) {
-      return;
-    }
+    if (createMutation.isPending || updateMutation.isPending) return;
 
     const payload = normalizeCompanyPayload(form, editingCompany?.status ?? 'prospect');
-
     if (editingCompany) {
       updateMutation.mutate({ id: editingCompany.id, data: payload });
       return;
@@ -200,11 +187,24 @@ export function CompaniesPage() {
   }
 
   function handleDeleteConfirm() {
-    if (!companyToDelete || deleteMutation.isPending) {
-      return;
-    }
-
+    if (!companyToDelete || deleteMutation.isPending) return;
     deleteMutation.mutate(companyToDelete.id);
+  }
+
+  function CompanyActions({ company }: { company: Company }) {
+    return (
+      <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => openEditDialog(company)} className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Edit ${company.name}`}>
+          <Pencil className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => navigate(`/crm/companies/${company.id}`)} className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`View ${company.name}`}>
+          <Eye className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => setCompanyToDelete(company)} disabled={deletePendingId === company.id} className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50" aria-label={`Delete ${company.name}`}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    );
   }
 
   const desktopTable = (
@@ -223,80 +223,30 @@ export function CompaniesPage() {
           <tbody className="divide-y divide-border">
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i}>
-                  {Array.from({ length: 5 }).map((_, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
-                    </td>
-                  ))}
-                </tr>
+                <tr key={i}>{Array.from({ length: 5 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="h-4 w-3/4 animate-pulse rounded bg-muted" /></td>)}</tr>
               ))
             ) : companies.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No companies found</td>
-              </tr>
+              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No companies found</td></tr>
             ) : (
               companies.map((company) => (
-                <tr
-                  key={company.id}
-                  className="cursor-pointer transition-colors hover:bg-muted/30"
-                  onClick={() => navigate(`/crm/companies/${company.id}`)}
-                >
+                <tr key={company.id} className="cursor-pointer transition-colors hover:bg-muted/30" onClick={() => navigate(`/crm/companies/${company.id}`)}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                        <CompanyAvatar company={company} className="h-9 w-9 rounded-lg" />
-                      </div>
+                      <CompanyAvatar company={company} />
                       <span className="max-w-[180px] truncate font-medium text-foreground">{company.name}</span>
                     </div>
                   </td>
                   <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">{company.industry ?? '—'}</td>
                   <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
                     {company.website ? (
-                      <a
-                        href={company.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <a href={company.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
                         <Globe className="h-3.5 w-3.5" />
                         {company.website.replace(/^https?:\/\//, '')}
                       </a>
-                    ) : (
-                      '—'
-                    )}
+                    ) : '—'}
                   </td>
                   <td className="hidden px-4 py-3 text-xs text-muted-foreground xl:table-cell">{formatRelative(company.createdAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => openEditDialog(company)}
-                        className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label={`Edit ${company.name}`}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/crm/companies/${company.id}`)}
-                        className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label={`View ${company.name}`}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCompanyToDelete(company)}
-                        disabled={deletePendingId === company.id}
-                        className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
-                        aria-label={`Delete ${company.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+                  <td className="px-4 py-3 text-right"><CompanyActions company={company} /></td>
                 </tr>
               ))
             )}
@@ -309,19 +259,9 @@ export function CompaniesPage() {
   const mobileCards = (
     <div className="space-y-3">
       {isLoading ? (
-        Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} className="rounded-lg border border-border bg-card p-4">
-            <div className="space-y-3">
-              <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
-              <div className="h-10 w-full animate-pulse rounded bg-muted" />
-            </div>
-          </div>
-        ))
+        Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-28 rounded-lg border border-border bg-card p-4"><div className="h-4 w-1/2 animate-pulse rounded bg-muted" /></div>)
       ) : companies.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
-          No companies found
-        </div>
+        <div className="rounded-lg border border-border bg-card px-4 py-12 text-center text-sm text-muted-foreground">No companies found</div>
       ) : (
         companies.map((company) => (
           <article key={company.id} className="space-y-4 rounded-lg border border-border bg-card p-4">
@@ -334,64 +274,15 @@ export function CompaniesPage() {
                 </div>
               </div>
             </div>
-
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>{company.industry ?? 'No industry set'}</p>
               <p>{company.size ? `${company.size} employees` : 'No company size set'}</p>
-              {company.website && (
-                <a
-                  href={company.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-primary hover:underline"
-                >
-                  <Globe className="h-4 w-4" />
-                  {company.website.replace(/^https?:\/\//, '')}
-                </a>
-              )}
+              {company.website && <a href={company.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-primary hover:underline"><Globe className="h-4 w-4" />{company.website.replace(/^https?:\/\//, '')}</a>}
             </div>
-
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => openEditDialog(company)}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                aria-label={`Edit ${company.name}`}
-              >
-                <Pencil className="h-4 w-4" />
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/crm/companies/${company.id}`)}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                aria-label={`View ${company.name}`}
-              >
-                <Eye className="h-4 w-4" />
-                View
-              </button>
-              {company.website && (
-                <a
-                  href={company.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                  aria-label={`Open website for ${company.name}`}
-                >
-                  <Globe className="h-4 w-4" />
-                  Website
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => setCompanyToDelete(company)}
-                disabled={deletePendingId === company.id}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-                aria-label={`Delete ${company.name}`}
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </button>
+              <button type="button" onClick={() => openEditDialog(company)} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"><Pencil className="h-4 w-4" />Edit</button>
+              <button type="button" onClick={() => navigate(`/crm/companies/${company.id}`)} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"><Eye className="h-4 w-4" />View</button>
+              <button type="button" onClick={() => setCompanyToDelete(company)} disabled={deletePendingId === company.id} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"><Trash2 className="h-4 w-4" />Delete</button>
             </div>
           </article>
         ))
@@ -404,29 +295,11 @@ export function CompaniesPage() {
       <PageShell
         title="Companies"
         description={`${total} total companies`}
-        actions={
-          <button
-            type="button"
-            onClick={openCreateDialog}
-            className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            New Company
-          </button>
-        }
+        actions={<button type="button" onClick={openCreateDialog} className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"><Plus className="h-4 w-4" />New Company</button>}
       >
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Search companies…"
-            className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          />
+          <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search companies…" className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
         </div>
 
         <ResponsiveDataView items={companies} renderMobile={() => mobileCards} renderDesktop={() => desktopTable} />
@@ -449,15 +322,11 @@ export function CompaniesPage() {
             resetDialogState();
             return;
           }
-
           setShowDialog(open);
         }}
         title={editingCompany ? 'Edit Company' : 'New Company'}
       >
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-3"
-        >
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Company name *</label>
             <input required autoFocus className={inputClass} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Acme Inc." />
@@ -484,35 +353,15 @@ export function CompaniesPage() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Company logo</label>
-            <input
-              ref={logoInputRef}
-              id="company-logo-upload"
-              aria-label="Company logo"
-              title="Upload company logo"
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-              className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm file:font-medium`}
-              onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-            />
+            <input ref={logoInputRef} aria-label="Company logo" title="Upload company logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className={`${inputClass} file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1 file:text-sm file:font-medium`} onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)} />
             <p className="text-xs text-muted-foreground">PNG, JPG, WEBP, or SVG up to 5MB.</p>
-            {editingCompany?.logoUrl && !logoFile ? (
-              <div className="flex items-center gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
-                <CompanyAvatar company={editingCompany} className="h-10 w-10 rounded-lg" />
-                <p className="text-xs text-muted-foreground">Current logo will be kept unless you choose a new file.</p>
-              </div>
-            ) : null}
+            {editingCompany?.logoUrl && !logoFile ? <div className="flex items-center gap-3 rounded-md border border-border bg-muted/20 px-3 py-2"><CompanyAvatar company={editingCompany} className="h-10 w-10 rounded-lg" /><p className="text-xs text-muted-foreground">Current logo will be kept unless you choose a new file.</p></div> : null}
             {logoFile ? <p className="text-xs text-muted-foreground">Selected: {logoFile.name}</p> : null}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={resetDialogState} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
             <button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {createMutation.isPending || updateMutation.isPending
-                ? editingCompany
-                  ? 'Saving company…'
-                  : 'Creating company…'
-                : editingCompany
-                  ? 'Save Changes'
-                  : 'Create Company'}
+              {createMutation.isPending || updateMutation.isPending ? 'Saving company…' : editingCompany ? 'Save Changes' : 'Create Company'}
             </button>
           </div>
         </form>
@@ -520,11 +369,7 @@ export function CompaniesPage() {
 
       <ConfirmDialog
         open={Boolean(companyToDelete)}
-        onOpenChange={(open) => {
-          if (!open && !deleteMutation.isPending) {
-            setCompanyToDelete(null);
-          }
-        }}
+        onOpenChange={(open) => { if (!open && !deleteMutation.isPending) setCompanyToDelete(null); }}
         title="Delete company"
         {...(companyToDelete ? { description: `Delete ${companyToDelete.name}? This action cannot be undone.` } : {})}
         confirmLabel="Delete company"
