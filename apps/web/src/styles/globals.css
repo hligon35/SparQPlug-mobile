@@ -96,6 +96,36 @@
   :focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
+
+  @media (max-width: 767px) {
+    table {
+      min-width: 720px;
+    }
+
+    th,
+    td {
+      white-space: nowrap;
+    }
+
+    button:not([type='submit']) {
+      min-height: 2rem;
+    }
+  }
+}
+
+@layer components {
+  .mobile-table-scroll {
+    @apply w-full overflow-x-auto overscroll-x-contain;
+  }
+
+  .mobile-table-scroll > table {
+    @apply min-w-[720px];
+  }
+
+  .row-empty-state,
+  .row-error-state {
+    @apply flex min-h-24 w-full items-center justify-center px-4 py-8 text-center text-sm text-muted-foreground;
+  }
 }
 
 @layer utilities {
