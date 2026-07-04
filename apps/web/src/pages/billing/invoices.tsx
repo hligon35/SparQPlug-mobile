@@ -36,7 +36,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 function getInvoiceLabel(invoice: StripeInvoice) {
-  return invoice.number || invoice.lineItems?.[0]?.description || invoice.stripeInvoiceId;
+  return invoice.label || invoice.number || invoice.lineItems?.[0]?.description || invoice.stripeInvoiceId;
 }
 
 export function BillingInvoicesPage() {
@@ -60,8 +60,8 @@ export function BillingInvoicesPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: BillingInvoiceFormValues) => api.post('/billing/invoices', normalizeBillingInvoicePayload(data)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
       toast({ title: 'Invoice created', variant: 'success' });
       setShowCreate(false);
       setForm(initialForm);
@@ -75,9 +75,9 @@ export function BillingInvoicesPage() {
   });
 
   const updateLabelMutation = useMutation({
-    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch(`/billing/invoices/${id}`, { label }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeInvoice>>(`/billing/invoices/${id}`, { label }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
       toast({ title: 'Invoice label saved', variant: 'success' });
       setEditingInvoice(null);
       setEditLabel('');
@@ -92,12 +92,14 @@ export function BillingInvoicesPage() {
 
   const syncMutation = useMutation({
     mutationFn: () => api.post<ApiResponse<{ synced: { customers: number; invoices: number; subscriptions: number } }>>('/billing/sync', { resources: ['customers', 'invoices'] }),
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
       const syncedInvoices = response.data?.synced.invoices ?? 0;
       const syncedCustomers = response.data?.synced.customers ?? 0;
-      queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
-      queryClient.invalidateQueries({ queryKey: ['billing-customers-list'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['billing-invoices'] }),
+        queryClient.invalidateQueries({ queryKey: ['billing-customers'] }),
+        queryClient.invalidateQueries({ queryKey: ['billing-customers-list'] }),
+      ]);
       toast({
         title: 'Stripe sync complete',
         description: `Imported ${syncedInvoices} invoices and ${syncedCustomers} customers from Stripe.`,
@@ -121,7 +123,7 @@ export function BillingInvoicesPage() {
 
   function openEditDialog(invoice: StripeInvoice) {
     setEditingInvoice(invoice);
-    setEditLabel(getInvoiceLabel(invoice));
+    setEditLabel(invoice.label ?? getInvoiceLabel(invoice));
   }
 
   function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -283,7 +285,7 @@ export function BillingInvoicesPage() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Display label</label>
             <input autoFocus className={inputClass} value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Client July Retainer" />
-            <p className="text-xs text-muted-foreground">This label is used inside SparQPlug so invoices are easier to identify.</p>
+            <p className="text-xs text-muted-foreground">This label is saved in SparQPlug and will not be overwritten by Stripe sync.</p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setEditingInvoice(null)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
