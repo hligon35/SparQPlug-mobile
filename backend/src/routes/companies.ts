@@ -15,6 +15,33 @@ export const companiesRouter = new Hono<{ Bindings: Bindings; Variables: Variabl
 const MAX_COMPANY_LOGO_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_COMPANY_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
 
+type CompanyPayload = z.infer<typeof CompanySchema>;
+
+function cleanText(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function cleanCompanyPayload(data: Partial<CompanyPayload>): CompanyPayload {
+  return {
+    name: data.name?.trim() ?? '',
+    domain: cleanText(data.domain),
+    industry: cleanText(data.industry),
+    size: data.size ?? null,
+    revenue: data.revenue ?? null,
+    phone: cleanText(data.phone),
+    email: cleanText(data.email),
+    website: cleanText(data.website),
+    logoUrl: cleanText(data.logoUrl),
+    ownerId: cleanText(data.ownerId),
+    status: data.status ?? 'prospect',
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    address: data.address,
+    notes: cleanText(data.notes),
+    customFields: data.customFields && typeof data.customFields === 'object' ? data.customFields : {},
+  };
+}
+
 function getCompanyLogoStorageKey(organizationId: string, companyId: string) {
   return `company-logos/${organizationId}/${companyId}`;
 }
@@ -105,15 +132,15 @@ companiesRouter.get('/:id', async (c) => {
   return c.json({ success: true, data: company });
 });
 
-companiesRouter.post('/', zValidator('json', CompanySchema), async (c) => {
+companiesRouter.post('/', zValidator('json', CompanySchema.partial().extend({ name: z.string().min(1, 'Company name required') })), async (c) => {
   const orgId = c.get('organizationId');
   const userId = c.get('userId');
-  const data = c.req.valid('json');
+  const data = cleanCompanyPayload(c.req.valid('json'));
   const db = createDb(c.env.DB);
 
   const id = generateId();
-  await db.insert(companies).values({ id, organizationId: orgId, ownerId: userId, ...data });
-  const company = await db.query.companies.findFirst({ where: eq(companies.id, id) });
+  await db.insert(companies).values({ id, organizationId: orgId, ...data, ownerId: data.ownerId ?? userId });
+  const company = await db.query.companies.findFirst({ where: and(eq(companies.id, id), eq(companies.organizationId, orgId)) });
   return c.json({ success: true, data: company }, 201);
 });
 
@@ -153,13 +180,13 @@ companiesRouter.post('/:id/logo', async (c) => {
 
   const logoUrl = buildCompanyLogoUrl(c, company.id);
   await db.update(companies).set({ logoUrl, updatedAt: new Date().toISOString() }).where(eq(companies.id, company.id));
-  const updated = await db.query.companies.findFirst({ where: eq(companies.id, company.id) });
+  const updated = await db.query.companies.findFirst({ where: and(eq(companies.id, company.id), eq(companies.organizationId, orgId)) });
   return c.json({ success: true, data: updated });
 });
 
 companiesRouter.patch('/:id', zValidator('json', CompanySchema.partial()), async (c) => {
   const orgId = c.get('organizationId');
-  const data = c.req.valid('json');
+  const data = cleanCompanyPayload(c.req.valid('json'));
   const db = createDb(c.env.DB);
 
   const existing = await db.query.companies.findFirst({
@@ -170,8 +197,8 @@ companiesRouter.patch('/:id', zValidator('json', CompanySchema.partial()), async
     return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company not found' } }, 404);
   }
 
-  await db.update(companies).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(companies.id, c.req.param('id')));
-  const updated = await db.query.companies.findFirst({ where: eq(companies.id, c.req.param('id')) });
+  await db.update(companies).set({ ...data, updatedAt: new Date().toISOString() }).where(and(eq(companies.id, existing.id), eq(companies.organizationId, orgId)));
+  const updated = await db.query.companies.findFirst({ where: and(eq(companies.id, existing.id), eq(companies.organizationId, orgId)) });
   return c.json({ success: true, data: updated });
 });
 
@@ -187,7 +214,7 @@ companiesRouter.delete('/:id', async (c) => {
     return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company not found' } }, 404);
   }
 
-  await db.delete(companies).where(eq(companies.id, c.req.param('id')));
+  await db.delete(companies).where(and(eq(companies.id, c.req.param('id')), eq(companies.organizationId, orgId)));
   await c.env.STORAGE.delete(getCompanyLogoStorageKey(orgId, c.req.param('id')));
   return c.json({ success: true, data: { id: c.req.param('id') } });
 });
