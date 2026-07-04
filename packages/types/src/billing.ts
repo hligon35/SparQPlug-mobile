@@ -38,6 +38,7 @@ export interface StripeInvoice extends BaseEntity {
   customer?: StripeCustomer;
   status: InvoiceStatus;
   number: string;
+  label?: string | null;
   currency: string;
   subtotal: number;
   tax: number;
@@ -73,6 +74,7 @@ export interface StripeSubscription extends BaseEntity {
   customer?: StripeCustomer;
   status: SubscriptionStatus;
   planName: string;
+  label?: string | null;
   planId: string;
   quantity: number;
   currency: string;
@@ -108,7 +110,7 @@ export interface RevenueMetrics {
   churnRate: number;
 }
 
-// ─── Invoice Builder ──────────────────────────────────────────────────────────
+// ─── Invoice Builder ─────────────────────────────────────────────────────────
 
 export const CreateInvoiceSchema = z.object({
   customerId: z.string().min(1, 'Customer required'),
@@ -130,3 +132,9 @@ export const CreateInvoiceSchema = z.object({
 });
 
 export type CreateInvoiceInput = z.infer<typeof CreateInvoiceSchema>;
+
+export const BillingLabelSchema = z.object({
+  label: z.string().trim().max(160).optional().nullable(),
+});
+
+export type BillingLabelInput = z.infer<typeof BillingLabelSchema>;
