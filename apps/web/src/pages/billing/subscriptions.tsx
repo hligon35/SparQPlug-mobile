@@ -66,7 +66,7 @@ export function BillingSubscriptionsPage() {
   });
 
   const updateLabelMutation = useMutation({
-    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeSubscription>>(`/billing/subscriptions/${id}`, { label }),
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeSubscription>>(`/billing/subscriptions/${id}/label`, { label }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] });
       toast({ title: 'Subscription label saved', variant: 'success' });
