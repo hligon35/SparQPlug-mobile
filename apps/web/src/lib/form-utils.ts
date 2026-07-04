@@ -135,13 +135,31 @@ export function sanitizeIntegerInput(value: string) {
 
 export function sanitizeDecimalInput(value: string) {
   const sanitized = value.replace(/[^\d.]/g, '');
-  const [whole, ...fractionParts] = sanitized.split('.');
+  const [whole = '', ...fractionParts] = sanitized.split('.');
 
   if (fractionParts.length === 0) {
     return sanitized;
   }
 
-  return `${whole}.${fractionParts.join('')}`;
+  return `${whole}.${fractionParts.join('').slice(0, 2)}`;
+}
+
+export function parseDecimalInput(value: string, fallback = 0) {
+  const parsed = Number.parseFloat(sanitizeDecimalInput(value));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function parseIntegerInput(value: string, fallback = 0) {
+  const parsed = Number.parseInt(sanitizeIntegerInput(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function normalizeDateTimeLocal(value: string | null | undefined) {
+  const trimmed = trimOrUndefined(value);
+  if (!trimmed) return undefined;
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? trimmed : date.toISOString();
 }
 
 export function normalizeContactPayload(form: ContactFormValues): ContactInput {
@@ -174,14 +192,14 @@ export function normalizeCompanyPayload(
 }
 
 export function normalizeOpportunityPayload(form: OpportunityFormValues): OpportunityInput {
-  const parsedValue = Number.parseFloat(form.value);
-  const parsedProbability = Number.parseInt(form.probability, 10);
+  const parsedValue = parseDecimalInput(form.value, 0);
+  const parsedProbability = parseIntegerInput(form.probability, 20);
 
   return {
     name: form.name.trim(),
     stage: form.stage,
-    value: Number.isFinite(parsedValue) ? parsedValue : 0,
-    probability: Number.isFinite(parsedProbability) ? parsedProbability : 20,
+    value: parsedValue,
+    probability: Math.min(100, Math.max(0, parsedProbability)),
     expectedCloseDate: trimOrUndefined(form.expectedCloseDate),
     companyId: trimOrUndefined(emptyToUndefined(form.companyId)),
     contactId: trimOrUndefined(emptyToUndefined(form.contactId)),
@@ -196,7 +214,7 @@ export function normalizeActivityPayload(form: ActivityFormValues) {
     type: form.type,
     subject: trimOrUndefined(form.subject) ?? form.type.replace('_', ' '),
     description: trimOrUndefined(form.description),
-    scheduledAt: trimOrUndefined(form.scheduledAt),
+    scheduledAt: normalizeDateTimeLocal(form.scheduledAt),
     contactId: trimOrUndefined(emptyToUndefined(form.contactId)),
     companyId: trimOrUndefined(emptyToUndefined(form.companyId)),
   };
@@ -212,7 +230,7 @@ export function normalizeBillingCustomerPayload(form: BillingCustomerFormValues)
 }
 
 export function normalizeBillingInvoicePayload(form: BillingInvoiceFormValues): CreateInvoiceInput {
-  const parsedAmount = Number.parseFloat(form.amount);
+  const parsedAmount = parseDecimalInput(form.amount, 0);
 
   return {
     customerId: form.customerId,
@@ -220,7 +238,7 @@ export function normalizeBillingInvoicePayload(form: BillingInvoiceFormValues): 
       {
         description: form.description.trim(),
         quantity: 1,
-        unitAmount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
+        unitAmount: parsedAmount,
       },
     ],
     dueDate: trimOrUndefined(form.dueDate),
