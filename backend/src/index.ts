@@ -3,6 +3,9 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
+import { zValidator } from '@hono/zod-validator';
+import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { authRouter } from './routes/auth';
 import { bootstrapRouter } from './routes/bootstrap';
@@ -23,6 +26,9 @@ import { servicesRouter } from './routes/services';
 import { passwordLockersRouter } from './routes/password-lockers';
 import { RealtimeDurableObject } from './durable-objects/realtime';
 import { RecordLockDurableObject } from './durable-objects/record-lock';
+import { createDb } from './db';
+import { stripeInvoices, stripeSubscriptions } from './db/schema';
+import { authMiddleware } from './middleware/auth';
 
 export type Bindings = {
   DB: D1Database;
@@ -52,6 +58,28 @@ export type Variables = {
 };
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const LabelSchema = z.object({ label: z.string().max(120).optional().nullable() });
+
+function normalizeLabel(label: string | null | undefined) {
+  const trimmed = label?.trim();
+  return trimmed ? trimmed : null;
+}
+
+async function ensureBillingLabelColumns(db: D1Database) {
+  try {
+    await db.prepare('ALTER TABLE stripe_invoices ADD COLUMN label text').run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (!message.includes('duplicate column') && !message.includes('already exists')) throw error;
+  }
+
+  try {
+    await db.prepare('ALTER TABLE stripe_subscriptions ADD COLUMN label text').run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (!message.includes('duplicate column') && !message.includes('already exists')) throw error;
+  }
+}
 
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
@@ -93,6 +121,34 @@ app.get('/health', (c) => {
   });
 });
 
+// ─── Direct Billing Label Saves ───────────────────────────────────────────────
+
+app.patch('/api/v1/billing/invoices/:id/label', authMiddleware, zValidator('json', LabelSchema), async (c) => {
+  await ensureBillingLabelColumns(c.env.DB);
+  const orgId = c.get('organizationId');
+  const { label } = c.req.valid('json');
+  const db = createDb(c.env.DB);
+  const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
+  if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
+
+  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)));
+  const updated = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)), with: { customer: true } });
+  return c.json({ success: true, data: updated });
+});
+
+app.patch('/api/v1/billing/subscriptions/:id/label', authMiddleware, zValidator('json', LabelSchema), async (c) => {
+  await ensureBillingLabelColumns(c.env.DB);
+  const orgId = c.get('organizationId');
+  const { label } = c.req.valid('json');
+  const db = createDb(c.env.DB);
+  const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, c.req.param('id')), eq(stripeSubscriptions.organizationId, orgId)) });
+  if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
+
+  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)));
+  const updated = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)), with: { customer: true } });
+  return c.json({ success: true, data: updated });
+});
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
 app.route('/api/v1/auth', authRouter);
@@ -128,7 +184,7 @@ app.onError((err, c) => {
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message: c.env.ENVIRONMENT === 'development' ? err.message : 'An error occurred',
+        message: err instanceof Error ? err.message : 'Internal server error',
       },
     },
     500,
