@@ -4,6 +4,25 @@ import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { Eye, EyeOff } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 
+const PENDING_ORGANIZATION_NAME_KEY = 'sparqplug.pendingOrganizationName';
+
+function getRegisterErrorMessage(error: unknown) {
+  const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'An account already exists for this email address.';
+    case 'auth/invalid-email':
+      return 'Enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password must be at least 8 characters.';
+    case 'auth/network-request-failed':
+      return 'Network error while creating your account. Check your connection and try again.';
+    default:
+      return error instanceof Error ? error.message : 'Registration failed.';
+  }
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
@@ -16,15 +35,26 @@ export function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedOrgName = orgName.trim();
+
+    if (!trimmedName || !trimmedEmail || !trimmedOrgName || !password) {
+      setError('Full name, organization name, email, and password are required.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     try {
-      const credential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(credential.user, { displayName: name });
+      window.localStorage.setItem(PENDING_ORGANIZATION_NAME_KEY, trimmedOrgName);
+      const credential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+      await updateProfile(credential.user, { displayName: trimmedName });
       navigate('/dashboard');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Registration failed';
-      setError(message);
+      window.localStorage.removeItem(PENDING_ORGANIZATION_NAME_KEY);
+      setError(getRegisterErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -40,30 +70,30 @@ export function RegisterPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+          <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive" role="alert">
             {error}
           </div>
         )}
 
         <div className="space-y-1.5">
-          <label htmlFor="name" className="text-sm font-medium text-foreground">Full name</label>
-          <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} placeholder="Jane Smith" />
+          <label htmlFor="register-name" className="text-sm font-medium text-foreground">Full name</label>
+          <input id="register-name" type="text" value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} placeholder="Jane Smith" />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="org" className="text-sm font-medium text-foreground">Organization name</label>
-          <input id="org" type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} required className={inputClass} placeholder="Acme Inc." />
+          <label htmlFor="register-organization" className="text-sm font-medium text-foreground">Organization name</label>
+          <input id="register-organization" type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} required autoComplete="organization" className={inputClass} placeholder="Acme Inc." />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="email" className="text-sm font-medium text-foreground">Work email</label>
-          <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" className={inputClass} placeholder="you@company.com" />
+          <label htmlFor="register-email" className="text-sm font-medium text-foreground">Work email</label>
+          <input id="register-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" className={inputClass} placeholder="you@company.com" />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="password" className="text-sm font-medium text-foreground">Password</label>
+          <label htmlFor="register-password" className="text-sm font-medium text-foreground">Password</label>
           <div className="relative">
-            <input id="password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" minLength={8} className={`${inputClass} pr-10`} placeholder="Min. 8 characters" />
+            <input id="register-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" minLength={8} className={`${inputClass} pr-10`} placeholder="Min. 8 characters" />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
