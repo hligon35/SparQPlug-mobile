@@ -493,6 +493,7 @@ export const stripeInvoices = sqliteTable(
       .notNull()
       .default('draft'),
     number: text('number'),
+    label: text('label'),
     currency: text('currency').notNull().default('usd'),
     subtotal: integer('subtotal').notNull().default(0),
     tax: integer('tax').notNull().default(0),
@@ -543,6 +544,7 @@ export const stripeSubscriptions = sqliteTable(
       .notNull()
       .default('active'),
     planName: text('plan_name').notNull(),
+    label: text('label'),
     planId: text('plan_id').notNull(),
     quantity: integer('quantity').notNull().default(1),
     currency: text('currency').notNull().default('usd'),
@@ -697,195 +699,5 @@ export const notifications = sqliteTable(
     userIdx: index('notifications_user_idx').on(t.userId),
     isReadIdx: index('notifications_is_read_idx').on(t.isRead),
     orgIdx: index('notifications_org_idx').on(t.organizationId),
-  }),
-);
-
-// ─── Audit Logs ───────────────────────────────────────────────────────────────
-
-export const auditLogs = sqliteTable(
-  'audit_logs',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
-    action: text('action').notNull(),
-    entity: text('entity').notNull(),
-    entityId: text('entity_id').notNull(),
-    entityLabel: text('entity_label').notNull(),
-    changes: text('changes', { mode: 'json' }).$type<Record<string, unknown>>(),
-    ipAddress: text('ip_address'),
-    userAgent: text('user_agent'),
-    ...timestamps,
-  },
-  (t) => ({
-    orgIdx: index('audit_logs_org_idx').on(t.organizationId),
-    userIdx: index('audit_logs_user_idx').on(t.userId),
-    entityIdx: index('audit_logs_entity_idx').on(t.entity, t.entityId),
-    createdAtIdx: index('audit_logs_created_at_idx').on(t.createdAt),
-  }),
-);
-
-// ─── API Keys ─────────────────────────────────────────────────────────────────
-
-export const apiKeys = sqliteTable(
-  'api_keys',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    keyHash: text('key_hash').notNull(),
-    keyPrefix: text('key_prefix').notNull(),
-    scopes: text('scopes', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    createdBy: text('created_by').notNull(),
-    lastUsedAt: text('last_used_at'),
-    expiresAt: text('expires_at'),
-    ...timestamps,
-  },
-  (t) => ({
-    orgIdx: index('api_keys_org_idx').on(t.organizationId),
-    keyHashIdx: uniqueIndex('api_keys_key_hash_idx').on(t.keyHash),
-  }),
-);
-
-// ─── Saved Views ──────────────────────────────────────────────────────────────
-
-export const savedViews = sqliteTable(
-  'saved_views',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    entity: text('entity', {
-      enum: ['contacts', 'companies', 'opportunities', 'activities'],
-    }).notNull(),
-    viewType: text('view_type', { enum: ['table', 'kanban', 'list', 'calendar'] })
-      .notNull()
-      .default('table'),
-    filters: text('filters', { mode: 'json' }).$type<unknown>(),
-    sort: text('sort', { mode: 'json' }).$type<unknown>(),
-    columns: text('columns', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
-    isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false),
-    createdBy: text('created_by').notNull(),
-    ...timestamps,
-  },
-  (t) => ({
-    orgEntityIdx: index('saved_views_org_entity_idx').on(t.organizationId, t.entity),
-  }),
-);
-
-// ─── Services Catalog ─────────────────────────────────────────────────────────
-// Global catalog of third-party services used to service clients
-
-export const services = sqliteTable(
-  'services',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    provider: text('provider').notNull(),
-    category: text('category', {
-      enum: ['hosting', 'email', 'auth', 'storage', 'database', 'cdn', 'payments', 'analytics', 'communications', 'productivity', 'other'],
-    }).notNull().default('other'),
-    billingType: text('billing_type', { enum: ['fixed', 'per_seat', 'usage'] })
-      .notNull()
-      .default('fixed'),
-    // For fixed/per_seat: unit cost in cents (e.g. 1200 = $12.00)
-    unitCostCents: integer('unit_cost_cents').notNull().default(0),
-    // Default markup percentage (e.g. 25 = 25%)
-    defaultMarkupPct: real('default_markup_pct').notNull().default(0),
-    currency: text('currency').notNull().default('USD'),
-    billingCycle: text('billing_cycle', { enum: ['monthly', 'annual', 'one_time'] })
-      .notNull()
-      .default('monthly'),
-    logoUrl: text('logo_url'),
-    url: text('url'),
-    notes: text('notes'),
-    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-    createdBy: text('created_by').notNull(),
-    ...timestamps,
-  },
-  (t) => ({
-    orgIdx: index('services_org_idx').on(t.organizationId),
-    categoryIdx: index('services_category_idx').on(t.category),
-  }),
-);
-
-// ─── Client Service Assignments ───────────────────────────────────────────────
-// Fixed/per_seat services assigned to a specific company
-
-export const clientServices = sqliteTable(
-  'client_services',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    companyId: text('company_id')
-      .notNull()
-      .references(() => companies.id, { onDelete: 'cascade' }),
-    serviceId: text('service_id')
-      .notNull()
-      .references(() => services.id, { onDelete: 'cascade' }),
-    // Quantity (seats, units) — for per_seat billing
-    quantity: integer('quantity').notNull().default(1),
-    // Override cost (if different from catalog) in cents
-    overrideCostCents: integer('override_cost_cents'),
-    // What we bill the client in cents
-    billedAmountCents: integer('billed_amount_cents').notNull().default(0),
-    notes: text('notes'),
-    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-    startDate: text('start_date'),
-    endDate: text('end_date'),
-    createdBy: text('created_by').notNull(),
-    ...timestamps,
-  },
-  (t) => ({
-    orgIdx: index('client_services_org_idx').on(t.organizationId),
-    companyIdx: index('client_services_company_idx').on(t.companyId),
-    serviceIdx: index('client_services_service_idx').on(t.serviceId),
-  }),
-);
-
-// ─── Service Expense Logs ─────────────────────────────────────────────────────
-// Monthly usage-based expense logs — actual invoiced amounts per billing period
-
-export const serviceExpenseLogs = sqliteTable(
-  'service_expense_logs',
-  {
-    ...id,
-    organizationId: text('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
-    serviceId: text('service_id')
-      .notNull()
-      .references(() => services.id, { onDelete: 'cascade' }),
-    // Billing period: YYYY-MM (e.g. "2026-05")
-    period: text('period').notNull(),
-    // Total actual bill for this period in cents
-    actualCostCents: integer('actual_cost_cents').notNull().default(0),
-    // Optional invoice reference
-    invoiceRef: text('invoice_ref'),
-    notes: text('notes'),
-    // Allocations split across companies: [{ companyId, pct, billedAmountCents }]
-    allocations: text('allocations', { mode: 'json' })
-      .$type<{ companyId: string; pct: number; billedAmountCents: number }[]>()
-      .notNull()
-      .default([]),
-    createdBy: text('created_by').notNull(),
-    ...timestamps,
-  },
-  (t) => ({
-    orgIdx: index('svc_expense_logs_org_idx').on(t.organizationId),
-    serviceIdx: index('svc_expense_logs_service_idx').on(t.serviceId),
-    periodIdx: index('svc_expense_logs_period_idx').on(t.period),
   }),
 );
