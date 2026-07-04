@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { Globe, Plus, TrendingUp, DollarSign, TrendingDown, Search, Trash2 } from 'lucide-react';
+import { Globe, Plus, TrendingUp, DollarSign, TrendingDown, Search, Trash2, RefreshCw } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatCompactNumber, formatDate } from '@/lib/utils';
 import { Dialog } from '@/components/ui/dialog';
@@ -16,6 +16,13 @@ type CloudflareZone = {
   id: string;
   name: string;
   status: string;
+};
+
+type DomainSyncResponse = {
+  imported: number;
+  created: number;
+  updated: number;
+  items: AnalyticsDomain[];
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -90,7 +97,6 @@ function ProfitabilitySection() {
         />
       </div>
 
-      {/* Totals */}
       {totals && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
@@ -110,7 +116,6 @@ function ProfitabilitySection() {
         </div>
       )}
 
-      {/* Bar chart */}
       {chartData.length > 0 && (
         <div className="rounded-lg border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground mb-4">Cost vs. Billed by Client</p>
@@ -130,7 +135,6 @@ function ProfitabilitySection() {
         </div>
       )}
 
-      {/* Table */}
       {isLoading ? (
         <div className="rounded-lg border border-border bg-card divide-y divide-border">
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="px-5 py-3.5"><div className="h-4 bg-muted animate-pulse rounded w-1/2" /></div>)}
@@ -183,7 +187,7 @@ export function AnalyticsPage() {
   const [zoneSearch, setZoneSearch] = useState('');
   const [selectedZoneId, setSelectedZoneId] = useState('');
 
-  const { data: domainsData } = useQuery({
+  const { data: domainsData, isLoading: domainsLoading } = useQuery({
     queryKey: ['analytics-domains'],
     queryFn: () => api.get<ApiResponse<PaginatedResponse<AnalyticsDomain>>>('/analytics/domains'),
   });
@@ -208,6 +212,28 @@ export function AnalyticsPage() {
       toast({
         title: 'Failed to add domain',
         description: getErrorMessage(error, 'Review the domain and zone details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const syncDomainsMutation = useMutation({
+    mutationFn: () => api.post<ApiResponse<DomainSyncResponse>>('/analytics/domains/sync'),
+    onSuccess: (response) => {
+      queryClient.invalidateQueries({ queryKey: ['analytics-domains'] });
+      const items = response.data?.items ?? [];
+      if (!selectedDomain && items[0]) {
+        setSelectedDomain(items[0].zoneId);
+      }
+      toast({
+        title: 'Cloudflare domains imported',
+        description: `Found ${response.data?.imported ?? 0} zones. Added ${response.data?.created ?? 0}, updated ${response.data?.updated ?? 0}.`,
+        variant: 'success',
+      });
+    },
+    onError: (error) =>
+      toast({
+        title: 'Cloudflare import failed',
+        description: getErrorMessage(error, 'Check the Cloudflare token and permissions.'),
         variant: 'destructive',
       }),
   });
@@ -238,7 +264,7 @@ export function AnalyticsPage() {
     }
   }, [domains, selectedDomain]);
 
-  const { data: snapshotData, isLoading } = useQuery({
+  const { data: snapshotData, isLoading, error: snapshotError } = useQuery({
     queryKey: ['analytics-snapshot', selectedDomain, dateRange],
     queryFn: () =>
       api.get<ApiResponse<AnalyticsSnapshot>>(`/analytics/domains/${selectedDomain}/snapshot`, { range: dateRange }),
@@ -248,6 +274,7 @@ export function AnalyticsPage() {
   const snapshot = snapshotData?.data;
   const metrics = snapshot?.metrics;
   const timeseries = snapshot?.timeseries ?? [];
+  const selectedDomainRecord = domains.find((domain) => domain.zoneId === selectedDomain);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -256,13 +283,23 @@ export function AnalyticsPage() {
           <h1 className="text-xl font-semibold text-foreground">Analytics</h1>
           <p className="text-sm text-muted-foreground">Cloudflare traffic insights</p>
         </div>
-        <button onClick={() => setShowAddDomain(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
-          <Plus className="h-4 w-4" />
-          Add Domain
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => syncDomainsMutation.mutate()}
+            disabled={syncDomainsMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncDomainsMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncDomainsMutation.isPending ? 'Importing…' : 'Import Cloudflare Zones'}
+          </button>
+          <button onClick={() => setShowAddDomain(true)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Plus className="h-4 w-4" />
+            Add Domain
+          </button>
+        </div>
       </div>
 
-      {/* Domain + date range selectors */}
       <div className="flex flex-wrap items-center gap-3">
         {domains.map((d) => (
           <div key={d.id} className={`inline-flex items-center gap-1 rounded-md border ${selectedDomain === d.zoneId ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
@@ -272,6 +309,7 @@ export function AnalyticsPage() {
             >
               <Globe className="h-3.5 w-3.5" />
               {d.name}
+              {d.status === 'inactive' ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">inactive</span> : null}
             </button>
             <button
               type="button"
@@ -297,7 +335,19 @@ export function AnalyticsPage() {
         </div>
       </div>
 
-      {/* KPIs */}
+      {domainsLoading && (
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="h-5 w-48 animate-pulse rounded bg-muted" />
+        </div>
+      )}
+
+      {snapshotError ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <p className="font-medium">Analytics could not load{selectedDomainRecord ? ` for ${selectedDomainRecord.name}` : ''}.</p>
+          <p className="mt-1">{getErrorMessage(snapshotError, 'Check Cloudflare token permissions for Zone Analytics Read.')}</p>
+        </div>
+      ) : null}
+
       {metrics && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
@@ -314,7 +364,6 @@ export function AnalyticsPage() {
         </div>
       )}
 
-      {/* Traffic chart */}
       {timeseries.length > 0 && (
         <div className="rounded-lg border border-border bg-card p-5">
           <p className="text-sm font-semibold text-foreground mb-4">Traffic Over Time</p>
@@ -336,12 +385,12 @@ export function AnalyticsPage() {
         </div>
       )}
 
-      {/* Top pages + countries */}
       {snapshot && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-lg border border-border bg-card p-5">
             <p className="text-sm font-semibold text-foreground mb-3">Top Pages</p>
             <div className="space-y-2">
+              {snapshot.topPages.length === 0 ? <p className="text-sm text-muted-foreground">Top pages are not available from this Cloudflare query yet.</p> : null}
               {snapshot.topPages.slice(0, 8).map((p) => (
                 <div key={p.url} className="flex items-center gap-2 text-sm">
                   <span className="flex-1 truncate text-muted-foreground font-mono text-xs">{p.url}</span>
@@ -353,6 +402,7 @@ export function AnalyticsPage() {
           <div className="rounded-lg border border-border bg-card p-5">
             <p className="text-sm font-semibold text-foreground mb-3">Top Countries</p>
             <div className="space-y-2">
+              {snapshot.topCountries.length === 0 ? <p className="text-sm text-muted-foreground">No country data returned for this range.</p> : null}
               {snapshot.topCountries.slice(0, 8).map((c) => (
                 <div key={c.country} className="flex items-center gap-2 text-sm">
                   <span className="flex-1 text-muted-foreground">{c.country}</span>
@@ -364,15 +414,23 @@ export function AnalyticsPage() {
         </div>
       )}
 
-      {!selectedDomain && (
+      {!selectedDomain && !domainsLoading && (
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-muted-foreground">
           <Globe className="h-10 w-10 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No domains configured</p>
-          <p className="text-sm mt-1">Add a Cloudflare domain to start tracking analytics</p>
+          <p className="text-sm mt-1">Import your Cloudflare zones or add a domain manually to start tracking analytics.</p>
+          <button
+            type="button"
+            onClick={() => syncDomainsMutation.mutate()}
+            disabled={syncDomainsMutation.isPending}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncDomainsMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncDomainsMutation.isPending ? 'Importing…' : 'Import Cloudflare Zones'}
+          </button>
         </div>
       )}
 
-      {/* Client Profitability */}
       <div className="border-t border-border pt-6">
         <ProfitabilitySection />
       </div>
@@ -443,7 +501,7 @@ export function AnalyticsPage() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">Cloudflare credentials are already configured in the deployed backend environment.</p>
+            <p className="text-xs text-muted-foreground">Cloudflare credentials are read from the deployed backend environment.</p>
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={() => setShowAddDomain(false)} className="h-9 rounded-md border border-border px-4 text-sm transition-colors hover:bg-muted">Cancel</button>
