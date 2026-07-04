@@ -8,14 +8,13 @@ import { stripeCustomers, stripeInvoices, stripeSubscriptions } from '../db/sche
 import { authMiddleware } from '../middleware/auth';
 import { generateId, buildPaginatedResult } from '../lib/utils';
 import { z } from 'zod';
-import { CreateInvoiceSchema } from '@sparqplug/types';
+import { BillingLabelSchema, CreateInvoiceSchema } from '@sparqplug/types';
 
 export const billingRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 billingRouter.use('*', authMiddleware);
 
 const SYNC_RESOURCES = ['customers', 'invoices', 'subscriptions'] as const;
 const SyncBillingSchema = z.object({ resources: z.array(z.enum(SYNC_RESOURCES)).optional() });
-const BillingLabelSchema = z.object({ label: z.string().trim().max(160).optional().nullable() });
 
 function getStripe(secretKey: string) {
   return new Stripe(secretKey, { apiVersion: '2024-06-20' });
@@ -35,6 +34,11 @@ function shouldSyncOrganization(metadata: Stripe.Metadata | null | undefined, or
 
 function toIsoString(timestamp: number | null | undefined) {
   return typeof timestamp === 'number' ? new Date(timestamp * 1000).toISOString() : null;
+}
+
+function normalizeLabel(label: string | null | undefined) {
+  const trimmed = label?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function mapInvoiceStatus(status: Stripe.Invoice.Status | null | undefined): 'draft' | 'open' | 'paid' | 'void' | 'uncollectible' {
@@ -146,9 +150,8 @@ async function syncInvoiceRecord(db: ReturnType<typeof createDb>, stripe: Stripe
     stripeInvoiceId: invoice.id,
     customerId: customer.id,
     status: mapInvoiceStatus(invoice.status),
-    // Use Stripe's invoice number when available. If Stripe has not assigned one yet,
-    // preserve the local label edited inside SparQPlug.
     number: invoice.number ?? existingInvoice?.number ?? null,
+    label: existingInvoice?.label ?? null,
     currency: invoice.currency ?? existingInvoice?.currency ?? customer.currency,
     subtotal: invoice.subtotal ?? existingInvoice?.subtotal ?? 0,
     tax: invoice.tax ?? existingInvoice?.tax ?? 0,
@@ -188,8 +191,8 @@ async function syncSubscriptionRecord(db: ReturnType<typeof createDb>, stripe: S
     stripeSubscriptionId: subscription.id,
     customerId: customer.id,
     status: mapSubscriptionStatus(subscription.status),
-    // Preserve local label edits over Stripe price nicknames once synced.
-    planName: existingSubscription?.planName ?? getSubscriptionPlanName(subscription),
+    planName: getSubscriptionPlanName(subscription),
+    label: existingSubscription?.label ?? null,
     planId: firstItem?.price.id ?? existingSubscription?.planId ?? subscription.id,
     quantity: firstItem?.quantity ?? existingSubscription?.quantity ?? 1,
     currency: firstItem?.price.currency ?? existingSubscription?.currency ?? customer.currency,
@@ -330,9 +333,9 @@ billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (
 
   const id = generateId();
   const total = data.lineItems.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
-  await db.insert(stripeInvoices).values({ id, organizationId: orgId, stripeInvoiceId: stripeInvoice.id, customerId: data.customerId, status: 'draft', number: data.notes ?? null, currency: data.currency, subtotal: Math.round(total * 100), tax: 0, discount: 0, total: Math.round(total * 100), amountPaid: 0, amountDue: Math.round(total * 100), lineItems: data.lineItems, dueDate: data.dueDate, hostedUrl: stripeInvoice.hosted_invoice_url });
+  await db.insert(stripeInvoices).values({ id, organizationId: orgId, stripeInvoiceId: stripeInvoice.id, customerId: data.customerId, status: 'draft', number: stripeInvoice.number ?? null, label: normalizeLabel(data.notes), currency: data.currency, subtotal: Math.round(total * 100), tax: 0, discount: 0, total: Math.round(total * 100), amountPaid: 0, amountDue: Math.round(total * 100), lineItems: data.lineItems, dueDate: data.dueDate, hostedUrl: stripeInvoice.hosted_invoice_url });
 
-  const invoice = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, id) });
+  const invoice = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, id), with: { customer: true } });
   return c.json({ success: true, data: invoice }, 201);
 });
 
@@ -343,8 +346,7 @@ billingRouter.patch('/invoices/:id', zValidator('json', BillingLabelSchema), asy
   const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
   if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
 
-  const trimmedLabel = label?.trim() || null;
-  await db.update(stripeInvoices).set({ number: trimmedLabel, updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, invoice.id));
+  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, invoice.id));
   const updated = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, invoice.id), with: { customer: true } });
   return c.json({ success: true, data: updated });
 });
@@ -392,8 +394,7 @@ billingRouter.patch('/subscriptions/:id', zValidator('json', BillingLabelSchema)
   const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, c.req.param('id')), eq(stripeSubscriptions.organizationId, orgId)) });
   if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
 
-  const trimmedLabel = label?.trim() || subscription.planId;
-  await db.update(stripeSubscriptions).set({ planName: trimmedLabel, updatedAt: new Date().toISOString() }).where(eq(stripeSubscriptions.id, subscription.id));
+  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(eq(stripeSubscriptions.id, subscription.id));
   const updated = await db.query.stripeSubscriptions.findFirst({ where: eq(stripeSubscriptions.id, subscription.id), with: { customer: true } });
   return c.json({ success: true, data: updated });
 });
