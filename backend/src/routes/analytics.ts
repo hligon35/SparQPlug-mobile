@@ -44,11 +44,20 @@ type GraphqlResponse = {
 };
 
 function normalizeDomainName(input: string) {
-  return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+}
+
+function getCloudflareToken(c: { env: Bindings }) {
+  const token = c.env.CLOUDFLARE_ANALYTICS_TOKEN?.trim();
+  if (!token) {
+    throw new Error('Cloudflare analytics token is not configured in the backend environment.');
+  }
+
+  return token;
 }
 
 async function fetchCloudflareZones(token: string, name?: string): Promise<CloudflareZone[]> {
-  const params = new URLSearchParams({ per_page: '50', status: 'active' });
+  const params = new URLSearchParams({ per_page: '100' });
   if (name) {
     params.set('name', normalizeDomainName(name));
   }
@@ -60,21 +69,38 @@ async function fetchCloudflareZones(token: string, name?: string): Promise<Cloud
     },
   });
 
-  if (!response.ok) {
-    throw new Error('Unable to load Cloudflare zones');
-  }
-
-  const payload = (await response.json()) as {
+  const payload = (await response.json().catch(() => null)) as {
     success?: boolean;
     result?: CloudflareZone[];
     errors?: Array<{ message?: string }>;
-  };
+  } | null;
 
-  if (!payload.success) {
-    throw new Error(payload.errors?.[0]?.message ?? 'Unable to load Cloudflare zones');
+  if (!response.ok || !payload?.success) {
+    const message = payload?.errors?.[0]?.message ?? `Cloudflare zones request failed with HTTP ${response.status}`;
+    throw new Error(message);
   }
 
   return payload.result ?? [];
+}
+
+async function upsertAnalyticsDomain(db: ReturnType<typeof createDb>, organizationId: string, zone: CloudflareZone) {
+  const normalizedName = normalizeDomainName(zone.name);
+  const status = zone.status === 'active' ? 'active' : 'inactive';
+  const existing = await db.query.analyticsDomains.findFirst({
+    where: and(eq(analyticsDomains.organizationId, organizationId), eq(analyticsDomains.zoneId, zone.id)),
+  });
+
+  if (existing) {
+    await db
+      .update(analyticsDomains)
+      .set({ name: normalizedName, status, updatedAt: new Date().toISOString() })
+      .where(eq(analyticsDomains.id, existing.id));
+    return { id: existing.id, created: false };
+  }
+
+  const id = generateId();
+  await db.insert(analyticsDomains).values({ id, organizationId, name: normalizedName, zoneId: zone.id, status });
+  return { id, created: true };
 }
 
 function buildAnalyticsSnapshot(
@@ -145,8 +171,6 @@ function buildAnalyticsSnapshot(
 export const analyticsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 analyticsRouter.use('*', authMiddleware);
 
-// ─── Domains ──────────────────────────────────────────────────────────────────
-
 analyticsRouter.get('/domains', async (c) => {
   const orgId = c.get('organizationId');
   const db = createDb(c.env.DB);
@@ -156,7 +180,7 @@ analyticsRouter.get('/domains', async (c) => {
 
 analyticsRouter.get('/domains/zones', zValidator('query', z.object({ name: z.string().optional() })), async (c) => {
   try {
-    const zones = await fetchCloudflareZones(c.env.CLOUDFLARE_ANALYTICS_TOKEN, c.req.valid('query').name);
+    const zones = await fetchCloudflareZones(getCloudflareToken(c), c.req.valid('query').name);
     return c.json({ success: true, data: zones });
   } catch (error) {
     return c.json(
@@ -172,6 +196,46 @@ analyticsRouter.get('/domains/zones', zValidator('query', z.object({ name: z.str
   }
 });
 
+analyticsRouter.post('/domains/sync', async (c) => {
+  const orgId = c.get('organizationId');
+  const db = createDb(c.env.DB);
+
+  try {
+    const zones = await fetchCloudflareZones(getCloudflareToken(c));
+    let created = 0;
+    let updated = 0;
+
+    for (const zone of zones) {
+      const result = await upsertAnalyticsDomain(db, orgId, zone);
+      if (result.created) created += 1;
+      else updated += 1;
+    }
+
+    const domains = await db.query.analyticsDomains.findMany({ where: eq(analyticsDomains.organizationId, orgId) });
+
+    return c.json({
+      success: true,
+      data: {
+        imported: zones.length,
+        created,
+        updated,
+        items: domains,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'ZONE_SYNC_FAILED',
+          message: error instanceof Error ? error.message : 'Unable to sync Cloudflare zones',
+        },
+      },
+      502,
+    );
+  }
+});
+
 analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().min(1), zoneId: z.string().optional() })), async (c) => {
   const orgId = c.get('organizationId');
   const { name, zoneId } = c.req.valid('json');
@@ -180,7 +244,7 @@ analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().
 
   let resolvedZoneId = zoneId?.trim();
   if (!resolvedZoneId) {
-    const zones = await fetchCloudflareZones(c.env.CLOUDFLARE_ANALYTICS_TOKEN, normalizedName);
+    const zones = await fetchCloudflareZones(getCloudflareToken(c), normalizedName);
     const exactZone = zones.find((zone) => normalizeDomainName(zone.name) === normalizedName);
     if (!exactZone) {
       return c.json({ success: false, error: { code: 'ZONE_NOT_FOUND', message: 'No matching Cloudflare zone found.' } }, 404);
@@ -188,18 +252,11 @@ analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().
     resolvedZoneId = exactZone.id;
   }
 
-  const existing = await db.query.analyticsDomains.findFirst({
-    where: and(eq(analyticsDomains.organizationId, orgId), eq(analyticsDomains.zoneId, resolvedZoneId)),
-  });
-
-  if (existing) {
-    return c.json({ success: true, data: existing });
-  }
-
-  const id = generateId();
-  await db.insert(analyticsDomains).values({ id, organizationId: orgId, name: normalizedName, zoneId: resolvedZoneId, status: 'active' });
-  const domain = await db.query.analyticsDomains.findFirst({ where: eq(analyticsDomains.id, id) });
-  return c.json({ success: true, data: domain }, 201);
+  const zones = await fetchCloudflareZones(getCloudflareToken(c), normalizedName);
+  const matchedZone = zones.find((zone) => zone.id === resolvedZoneId) ?? { id: resolvedZoneId, name: normalizedName, status: 'active' };
+  const result = await upsertAnalyticsDomain(db, orgId, matchedZone);
+  const domain = await db.query.analyticsDomains.findFirst({ where: eq(analyticsDomains.id, result.id) });
+  return c.json({ success: true, data: domain }, result.created ? 201 : 200);
 });
 
 analyticsRouter.delete('/domains/:id', async (c) => {
@@ -218,8 +275,6 @@ analyticsRouter.delete('/domains/:id', async (c) => {
   return c.json({ success: true, data: { id: domain.id } });
 });
 
-// ─── Fetch Analytics from Cloudflare ─────────────────────────────────────────
-
 analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ since: z.string().optional(), until: z.string().optional(), range: z.string().default('24h') })), async (c) => {
   const orgId = c.get('organizationId');
   const zoneId = c.req.param('zoneId');
@@ -234,7 +289,6 @@ analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ 
     return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Analytics domain not found' } }, 404);
   }
 
-  // Calculate date range
   const now = new Date();
   let sinceDate: Date;
 
@@ -270,13 +324,13 @@ analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ 
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${c.env.CLOUDFLARE_ANALYTICS_TOKEN}`,
+      Authorization: `Bearer ${getCloudflareToken(c)}`,
     },
     body: JSON.stringify({ query }),
   });
 
   if (!resp.ok) {
-    return c.json({ success: false, error: { code: 'ANALYTICS_ERROR', message: 'Failed to fetch analytics' } }, 502);
+    return c.json({ success: false, error: { code: 'ANALYTICS_ERROR', message: `Failed to fetch analytics from Cloudflare (HTTP ${resp.status})` } }, 502);
   }
 
   const result = (await resp.json()) as GraphqlResponse;
