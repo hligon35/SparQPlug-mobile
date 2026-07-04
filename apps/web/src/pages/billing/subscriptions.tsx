@@ -28,6 +28,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getSubscriptionLabel(subscription: StripeSubscription) {
+  return subscription.label || subscription.planName || subscription.stripeSubscriptionId;
+}
+
 export function BillingSubscriptionsPage() {
   const queryClient = useQueryClient();
   const [editingSubscription, setEditingSubscription] = useState<StripeSubscription | null>(null);
@@ -41,10 +45,12 @@ export function BillingSubscriptionsPage() {
 
   const syncMutation = useMutation({
     mutationFn: () => api.post<ApiResponse<{ synced: { customers: number; invoices: number; subscriptions: number } }>>('/billing/sync', { resources: ['customers', 'subscriptions'] }),
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
       const syncedSubscriptions = response.data?.synced.subscriptions ?? 0;
-      queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] });
-      queryClient.invalidateQueries({ queryKey: ['billing-customers'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] }),
+        queryClient.invalidateQueries({ queryKey: ['billing-customers'] }),
+      ]);
       toast({
         title: 'Stripe sync complete',
         description: `Imported ${syncedSubscriptions} subscriptions from Stripe.`,
@@ -60,9 +66,9 @@ export function BillingSubscriptionsPage() {
   });
 
   const updateLabelMutation = useMutation({
-    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch(`/billing/subscriptions/${id}`, { label }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] });
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeSubscription>>(`/billing/subscriptions/${id}`, { label }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['billing-subscriptions'] });
       toast({ title: 'Subscription label saved', variant: 'success' });
       setEditingSubscription(null);
       setEditLabel('');
@@ -79,7 +85,7 @@ export function BillingSubscriptionsPage() {
 
   function openEditDialog(subscription: StripeSubscription) {
     setEditingSubscription(subscription);
-    setEditLabel(subscription.planName);
+    setEditLabel(subscription.label ?? getSubscriptionLabel(subscription));
   }
 
   function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -132,7 +138,7 @@ export function BillingSubscriptionsPage() {
                     <div className="flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-muted-foreground shrink-0" />
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-foreground">{sub.planName}</p>
+                        <p className="truncate font-medium text-foreground">{getSubscriptionLabel(sub)}</p>
                         <p className="font-mono text-xs text-muted-foreground">{sub.stripeSubscriptionId}</p>
                       </div>
                     </div>
@@ -167,7 +173,7 @@ export function BillingSubscriptionsPage() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Display label</label>
             <input autoFocus className={inputClass} value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Client hosting plan" />
-            <p className="text-xs text-muted-foreground">This label is stored in SparQPlug and preserved during Stripe sync.</p>
+            <p className="text-xs text-muted-foreground">This label is saved in SparQPlug and will not be overwritten by Stripe sync.</p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setEditingSubscription(null)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
