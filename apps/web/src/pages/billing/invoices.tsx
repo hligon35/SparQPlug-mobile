@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FileText, RefreshCw } from 'lucide-react';
+import { Plus, FileText, RefreshCw, Pencil } from 'lucide-react';
 import { ApiError, api } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -35,11 +35,17 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getInvoiceLabel(invoice: StripeInvoice) {
+  return invoice.number || invoice.lineItems?.[0]?.description || invoice.stripeInvoiceId;
+}
+
 export function BillingInvoicesPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<BillingInvoiceFormValues>(initialForm);
+  const [editingInvoice, setEditingInvoice] = useState<StripeInvoice | null>(null);
+  const [editLabel, setEditLabel] = useState('');
   const LIMIT = 20;
 
   const { data, isLoading } = useQuery({
@@ -64,6 +70,22 @@ export function BillingInvoicesPage() {
       toast({
         title: 'Failed to create invoice',
         description: getErrorMessage(error, 'Review the invoice details and try again.'),
+        variant: 'destructive',
+      }),
+  });
+
+  const updateLabelMutation = useMutation({
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch(`/billing/invoices/${id}`, { label }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
+      toast({ title: 'Invoice label saved', variant: 'success' });
+      setEditingInvoice(null);
+      setEditLabel('');
+    },
+    onError: (error) =>
+      toast({
+        title: 'Failed to save invoice label',
+        description: getErrorMessage(error, 'The invoice label could not be updated.'),
         variant: 'destructive',
       }),
   });
@@ -96,6 +118,17 @@ export function BillingInvoicesPage() {
     enabled: showCreate,
   });
   const customersList = customersData?.data?.items ?? [];
+
+  function openEditDialog(invoice: StripeInvoice) {
+    setEditingInvoice(invoice);
+    setEditLabel(getInvoiceLabel(invoice));
+  }
+
+  function handleEditSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingInvoice || updateLabelMutation.isPending) return;
+    updateLabelMutation.mutate({ id: editingInvoice.id, label: editLabel });
+  }
 
   return (
     <div className="p-6 space-y-4 max-w-7xl mx-auto">
@@ -130,26 +163,30 @@ export function BillingInvoicesPage() {
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">Amount</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Due Date</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Created</th>
+              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {isLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i}>
-                  {Array.from({ length: 5 }).map((_, j) => (
+                  {Array.from({ length: 6 }).map((_, j) => (
                     <td key={j} className="px-4 py-3"><div className="h-4 rounded bg-muted animate-pulse w-3/4" /></td>
                   ))}
                 </tr>
               ))
             ) : invoices.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">No invoices found. Use Sync Stripe to import existing Stripe invoices.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">No invoices found. Use Sync Stripe to import existing Stripe invoices.</td></tr>
             ) : (
               invoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="font-mono text-xs text-foreground">{inv.stripeInvoiceId}</span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-foreground">{getInvoiceLabel(inv)}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{inv.stripeInvoiceId}</p>
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -165,6 +202,12 @@ export function BillingInvoicesPage() {
                   </td>
                   <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
                     {formatDate(inv.createdAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button type="button" onClick={() => openEditDialog(inv)} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                      <Pencil className="h-3.5 w-3.5" />
+                      Label
+                    </button>
                   </td>
                 </tr>
               ))
@@ -214,12 +257,12 @@ export function BillingInvoicesPage() {
             </div>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Notes</label>
+            <label className="text-xs font-medium text-muted-foreground">Invoice label</label>
             <textarea
               className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Optional note shown internally"
+              placeholder="Internal display label, like Client July Retainer"
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-foreground">
@@ -230,6 +273,22 @@ export function BillingInvoicesPage() {
             <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
             <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
               {createMutation.isPending ? 'Creating…' : 'Create Invoice'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog open={Boolean(editingInvoice)} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }} title="Edit invoice label">
+        <form onSubmit={handleEditSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Display label</label>
+            <input autoFocus className={inputClass} value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Client July Retainer" />
+            <p className="text-xs text-muted-foreground">This label is used inside SparQPlug so invoices are easier to identify.</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setEditingInvoice(null)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+            <button type="submit" disabled={updateLabelMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+              {updateLabelMutation.isPending ? 'Saving…' : 'Save Label'}
             </button>
           </div>
         </form>
