@@ -107,8 +107,14 @@
       white-space: nowrap;
     }
 
-    button:not([type='submit']) {
-      min-height: 2rem;
+    button {
+      font-size: 80%;
+      line-height: 1.1;
+    }
+
+    button[type='submit'] {
+      font-size: 0.875rem;
+      line-height: 1.25rem;
     }
   }
 }
