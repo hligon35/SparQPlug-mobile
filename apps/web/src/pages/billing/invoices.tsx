@@ -75,7 +75,7 @@ export function BillingInvoicesPage() {
   });
 
   const updateLabelMutation = useMutation({
-    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeInvoice>>(`/billing/invoices/${id}`, { label }),
+    mutationFn: ({ id, label }: { id: string; label: string }) => api.patch<ApiResponse<StripeInvoice>>(`/billing/invoices/${id}/label`, { label }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['billing-invoices'] });
       toast({ title: 'Invoice label saved', variant: 'success' });
@@ -261,21 +261,16 @@ export function BillingInvoicesPage() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Invoice label</label>
             <textarea
-              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+              className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Internal display label, like Client July Retainer"
+              placeholder="Internal label shown in SparQPlug"
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input type="checkbox" checked={form.autoSend} onChange={(e) => setForm((f) => ({ ...f, autoSend: e.target.checked }))} className="h-4 w-4 rounded border-border" />
-            Send invoice automatically after creation
-          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={form.autoSend} onChange={(e) => setForm((f) => ({ ...f, autoSend: e.target.checked }))} /> Auto-send invoice</label>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setShowCreate(false)} className="h-9 px-4 rounded-md border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
-            <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
-              {createMutation.isPending ? 'Creating…' : 'Create Invoice'}
-            </button>
+            <button type="submit" disabled={createMutation.isPending} className="h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">{createMutation.isPending ? 'Creating…' : 'Create Invoice'}</button>
           </div>
         </form>
       </Dialog>
@@ -284,7 +279,7 @@ export function BillingInvoicesPage() {
         <form onSubmit={handleEditSubmit} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Display label</label>
-            <input autoFocus className={inputClass} value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Client July Retainer" />
+            <input autoFocus className={inputClass} value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Acme monthly retainer" />
             <p className="text-xs text-muted-foreground">This label is saved in SparQPlug and will not be overwritten by Stripe sync.</p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
