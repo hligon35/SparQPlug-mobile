@@ -141,6 +141,29 @@ companiesRouter.get(
   },
 );
 
+companiesRouter.get('/debug/persistence', async (c) => {
+  const orgId = c.get('organizationId');
+  const db = createDb(c.env.DB);
+
+  const [countResult, recent] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(companies).where(eq(companies.organizationId, orgId)),
+    db.query.companies.findMany({
+      where: eq(companies.organizationId, orgId),
+      limit: 10,
+      orderBy: [desc(companies.createdAt)],
+    }),
+  ]);
+
+  return c.json({
+    success: true,
+    data: {
+      organizationId: orgId,
+      total: countResult[0]?.count ?? 0,
+      recent,
+    },
+  });
+});
+
 companiesRouter.get('/:id', async (c) => {
   const orgId = c.get('organizationId');
   const db = createDb(c.env.DB);
