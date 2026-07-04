@@ -16,12 +16,76 @@ const MAX_COMPANY_LOGO_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_COMPANY_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
 
 type CompanyPayload = z.infer<typeof CompanySchema>;
-
 type CompanyUpdatePayload = Partial<CompanyPayload> & { updatedAt?: string };
+
+type CompanyRow = {
+  id: string;
+  organization_id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  size: string | null;
+  revenue: number | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  owner_id: string | null;
+  status: string;
+  tags: string | null;
+  address: string | null;
+  notes: string | null;
+  custom_fields: string | null;
+  logo_url: string | null;
+  last_activity_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function cleanText(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function safeJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeCount(value: unknown) {
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number.parseInt(value, 10) || 0;
+  return 0;
+}
+
+function mapCompanyRow(row: CompanyRow) {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    domain: row.domain,
+    industry: row.industry,
+    size: row.size,
+    revenue: row.revenue,
+    phone: row.phone,
+    email: row.email,
+    website: row.website,
+    ownerId: row.owner_id,
+    status: row.status,
+    tags: safeJson<string[]>(row.tags, []),
+    address: safeJson<Record<string, string> | undefined>(row.address, undefined),
+    notes: row.notes,
+    customFields: safeJson<Record<string, unknown>>(row.custom_fields, {}),
+    logoUrl: row.logo_url,
+    lastActivityAt: row.last_activity_at,
+    contactCount: 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function cleanCompanyCreatePayload(data: Partial<CompanyPayload>): CompanyPayload {
@@ -116,28 +180,49 @@ companiesRouter.get(
   async (c) => {
     const orgId = c.get('organizationId');
     const { page, limit, search, status } = c.req.valid('query');
-    const db = createDb(c.env.DB);
-
-    const conditions = [eq(companies.organizationId, orgId)];
-    if (search) conditions.push(like(companies.name, `%${search}%`));
-    if (status) conditions.push(eq(companies.status, status));
-
     const offset = (page - 1) * limit;
 
-    const [rows, countResult] = await Promise.all([
-      db.query.companies.findMany({
-        where: and(...conditions),
-        limit,
-        offset,
-        orderBy: [desc(companies.createdAt)],
-      }),
-      db.select({ count: sql<number>`count(*)` }).from(companies).where(and(...conditions)),
-    ]);
+    const clauses = ['organization_id = ?'];
+    const params: unknown[] = [orgId];
+    if (search) {
+      clauses.push('name LIKE ?');
+      params.push(`%${search}%`);
+    }
+    if (status) {
+      clauses.push('status = ?');
+      params.push(status);
+    }
+    const whereSql = clauses.join(' AND ');
 
-    return c.json({
-      success: true,
-      data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0),
-    });
+    try {
+      const rowsResult = await c.env.DB.prepare(
+        `SELECT id, organization_id, name, domain, industry, size, revenue, phone, email, website, owner_id, status, tags, address, notes, custom_fields, logo_url, last_activity_at, created_at, updated_at
+         FROM companies
+         WHERE ${whereSql}
+         ORDER BY datetime(created_at) DESC
+         LIMIT ? OFFSET ?`,
+      )
+        .bind(...params, limit, offset)
+        .all<CompanyRow>();
+
+      const countResult = await c.env.DB.prepare(`SELECT COUNT(*) AS count FROM companies WHERE ${whereSql}`)
+        .bind(...params)
+        .first<{ count: number | string | bigint }>();
+
+      return c.json({
+        success: true,
+        data: buildPaginatedResult(
+          (rowsResult.results ?? []).map(mapCompanyRow),
+          page,
+          limit,
+          normalizeCount(countResult?.count),
+        ),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Company list query failed';
+      console.error('[Companies list error]', message);
+      return c.json({ success: false, error: { code: 'COMPANY_LIST_FAILED', message } }, 500);
+    }
   },
 );
 
@@ -158,7 +243,7 @@ companiesRouter.get('/debug/persistence', async (c) => {
     success: true,
     data: {
       organizationId: orgId,
-      total: countResult[0]?.count ?? 0,
+      total: normalizeCount(countResult[0]?.count),
       recent,
     },
   });
