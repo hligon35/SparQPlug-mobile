@@ -17,12 +17,14 @@ const ACCEPTED_COMPANY_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/w
 
 type CompanyPayload = z.infer<typeof CompanySchema>;
 
+type CompanyUpdatePayload = Partial<CompanyPayload> & { updatedAt?: string };
+
 function cleanText(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 }
 
-function cleanCompanyPayload(data: Partial<CompanyPayload>): CompanyPayload {
+function cleanCompanyCreatePayload(data: Partial<CompanyPayload>): CompanyPayload {
   return {
     name: data.name?.trim() ?? '',
     domain: cleanText(data.domain),
@@ -40,6 +42,28 @@ function cleanCompanyPayload(data: Partial<CompanyPayload>): CompanyPayload {
     notes: cleanText(data.notes),
     customFields: data.customFields && typeof data.customFields === 'object' ? data.customFields : {},
   };
+}
+
+function cleanCompanyUpdatePayload(data: Partial<CompanyPayload>): CompanyUpdatePayload {
+  const update: CompanyUpdatePayload = {};
+
+  if (data.name !== undefined) update.name = data.name.trim();
+  if (data.domain !== undefined) update.domain = cleanText(data.domain);
+  if (data.industry !== undefined) update.industry = cleanText(data.industry);
+  if (data.size !== undefined) update.size = data.size;
+  if (data.revenue !== undefined) update.revenue = data.revenue;
+  if (data.phone !== undefined) update.phone = cleanText(data.phone);
+  if (data.email !== undefined) update.email = cleanText(data.email);
+  if (data.website !== undefined) update.website = cleanText(data.website);
+  if (data.logoUrl !== undefined) update.logoUrl = cleanText(data.logoUrl);
+  if (data.ownerId !== undefined) update.ownerId = cleanText(data.ownerId);
+  if (data.status !== undefined) update.status = data.status;
+  if (data.tags !== undefined) update.tags = Array.isArray(data.tags) ? data.tags : [];
+  if (data.address !== undefined) update.address = data.address;
+  if (data.notes !== undefined) update.notes = cleanText(data.notes);
+  if (data.customFields !== undefined) update.customFields = data.customFields && typeof data.customFields === 'object' ? data.customFields : {};
+
+  return update;
 }
 
 function getCompanyLogoStorageKey(organizationId: string, companyId: string) {
@@ -135,7 +159,7 @@ companiesRouter.get('/:id', async (c) => {
 companiesRouter.post('/', zValidator('json', CompanySchema.partial().extend({ name: z.string().min(1, 'Company name required') })), async (c) => {
   const orgId = c.get('organizationId');
   const userId = c.get('userId');
-  const data = cleanCompanyPayload(c.req.valid('json'));
+  const data = cleanCompanyCreatePayload(c.req.valid('json'));
   const db = createDb(c.env.DB);
 
   const id = generateId();
@@ -186,7 +210,7 @@ companiesRouter.post('/:id/logo', async (c) => {
 
 companiesRouter.patch('/:id', zValidator('json', CompanySchema.partial()), async (c) => {
   const orgId = c.get('organizationId');
-  const data = cleanCompanyPayload(c.req.valid('json'));
+  const data = cleanCompanyUpdatePayload(c.req.valid('json'));
   const db = createDb(c.env.DB);
 
   const existing = await db.query.companies.findFirst({
