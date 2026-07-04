@@ -16,6 +16,32 @@ billingRouter.use('*', authMiddleware);
 const SYNC_RESOURCES = ['customers', 'invoices', 'subscriptions'] as const;
 const SyncBillingSchema = z.object({ resources: z.array(z.enum(SYNC_RESOURCES)).optional() });
 
+let billingLabelColumnsReady = false;
+
+async function addColumnIfMissing(db: D1Database, table: string, column: string, definition: string) {
+  try {
+    await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    if (message.includes('duplicate column') || message.includes('already exists')) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function ensureBillingLabelColumns(db: D1Database) {
+  if (billingLabelColumnsReady) return;
+  await addColumnIfMissing(db, 'stripe_invoices', 'label', 'text');
+  await addColumnIfMissing(db, 'stripe_subscriptions', 'label', 'text');
+  billingLabelColumnsReady = true;
+}
+
+billingRouter.use('*', async (c, next) => {
+  await ensureBillingLabelColumns(c.env.DB);
+  await next();
+});
+
 function getStripe(secretKey: string) {
   return new Stripe(secretKey, { apiVersion: '2024-06-20' });
 }
@@ -346,8 +372,8 @@ billingRouter.patch('/invoices/:id', zValidator('json', BillingLabelSchema), asy
   const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
   if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
 
-  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, invoice.id));
-  const updated = await db.query.stripeInvoices.findFirst({ where: eq(stripeInvoices.id, invoice.id), with: { customer: true } });
+  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)));
+  const updated = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)), with: { customer: true } });
   return c.json({ success: true, data: updated });
 });
 
@@ -358,7 +384,7 @@ billingRouter.post('/invoices/:id/send', async (c) => {
   const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
   if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
   await stripe.invoices.sendInvoice(invoice.stripeInvoiceId);
-  await db.update(stripeInvoices).set({ status: 'open', updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, c.req.param('id')));
+  await db.update(stripeInvoices).set({ status: 'open', updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)));
   return c.json({ success: true, data: { id: c.req.param('id'), status: 'open' } });
 });
 
@@ -369,7 +395,7 @@ billingRouter.post('/invoices/:id/void', async (c) => {
   const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
   if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
   await stripe.invoices.voidInvoice(invoice.stripeInvoiceId);
-  await db.update(stripeInvoices).set({ status: 'void', updatedAt: new Date().toISOString() }).where(eq(stripeInvoices.id, c.req.param('id')));
+  await db.update(stripeInvoices).set({ status: 'void', updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)));
   return c.json({ success: true, data: { id: c.req.param('id'), status: 'void' } });
 });
 
@@ -394,8 +420,8 @@ billingRouter.patch('/subscriptions/:id', zValidator('json', BillingLabelSchema)
   const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, c.req.param('id')), eq(stripeSubscriptions.organizationId, orgId)) });
   if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
 
-  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(eq(stripeSubscriptions.id, subscription.id));
-  const updated = await db.query.stripeSubscriptions.findFirst({ where: eq(stripeSubscriptions.id, subscription.id), with: { customer: true } });
+  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)));
+  const updated = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)), with: { customer: true } });
   return c.json({ success: true, data: updated });
 });
 
