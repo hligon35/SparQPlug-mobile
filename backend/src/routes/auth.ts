@@ -10,6 +10,17 @@ import { generateId } from '../lib/utils';
 
 export const authRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
+function slugifyOrganizationName(name: string, fallback: string) {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+
+  return slug || fallback;
+}
+
 // ─── Verify Firebase Token & Upsert User ─────────────────────────────────────
 
 authRouter.post(
@@ -18,10 +29,11 @@ authRouter.post(
     'json',
     z.object({
       idToken: z.string().min(1, 'ID token required'),
+      organizationName: z.string().trim().min(1).max(120).optional(),
     }),
   ),
   async (c) => {
-    const { idToken } = c.req.valid('json');
+    const { idToken, organizationName } = c.req.valid('json');
     const db = createDb(c.env.DB);
 
     // Verify Firebase token
@@ -42,11 +54,13 @@ authRouter.post(
       // New user — check if they need an org created
       const orgId = generateId();
       const userId = generateId();
+      const fallbackOrgName = firebaseUser.email?.split('@')[1] ?? 'My Organization';
+      const orgName = organizationName?.trim() || fallbackOrgName;
 
       await db.insert(organizations).values({
         id: orgId,
-        name: firebaseUser.email?.split('@')[1] ?? 'My Organization',
-        slug: orgId,
+        name: orgName,
+        slug: slugifyOrganizationName(orgName, orgId),
         plan: 'starter',
         settings: {},
       });
