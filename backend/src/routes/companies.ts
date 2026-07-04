@@ -24,6 +24,33 @@ function buildCompanyLogoUrl(c: Context<{ Bindings: Bindings; Variables: Variabl
   return `${requestUrl.origin}/api/v1/companies/${companyId}/logo?v=${Date.now()}`;
 }
 
+// Logo assets are intentionally public so <img src="..."> can load them without
+// a bearer token. Organization-scoped company data below this point is protected.
+companiesRouter.get('/:id/logo', async (c) => {
+  const db = createDb(c.env.DB);
+
+  const company = await db.query.companies.findFirst({
+    where: eq(companies.id, c.req.param('id')),
+  });
+
+  if (!company?.logoUrl) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found' } }, 404);
+  }
+
+  const object = await c.env.STORAGE.get(getCompanyLogoStorageKey(company.organizationId, company.id));
+  if (!object) {
+    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found in storage' } }, 404);
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('Cache-Control', 'public, max-age=300');
+
+  return new Response(object.body, { headers });
+});
+
+companiesRouter.use('*', authMiddleware);
+
 companiesRouter.get(
   '/',
   zValidator(
@@ -77,31 +104,6 @@ companiesRouter.get('/:id', async (c) => {
 
   return c.json({ success: true, data: company });
 });
-
-companiesRouter.get('/:id/logo', async (c) => {
-  const db = createDb(c.env.DB);
-
-  const company = await db.query.companies.findFirst({
-    where: eq(companies.id, c.req.param('id')),
-  });
-
-  if (!company?.logoUrl) {
-    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found' } }, 404);
-  }
-
-  const object = await c.env.STORAGE.get(getCompanyLogoStorageKey(company.organizationId, company.id));
-  if (!object) {
-    return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Company logo not found in storage' } }, 404);
-  }
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set('Cache-Control', 'public, max-age=300');
-
-  return new Response(object.body, { headers });
-});
-
-companiesRouter.use('*', authMiddleware);
 
 companiesRouter.post('/', zValidator('json', CompanySchema), async (c) => {
   const orgId = c.get('organizationId');
