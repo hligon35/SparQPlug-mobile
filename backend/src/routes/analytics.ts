@@ -27,7 +27,6 @@ type GraphqlGroup = {
   };
   dimensions?: {
     datetime?: string;
-    clientCountryName?: string;
   };
 };
 
@@ -168,9 +167,9 @@ function buildAnalyticsSnapshot(
     trafficTimeseries: timeseries,
     topPages: [],
     topCountries: countryGroups.map((group) => ({
-      country: group.dimensions?.clientCountryName ?? 'Unknown',
+      country: 'Unknown',
       countryCode: '',
-      countryName: group.dimensions?.clientCountryName ?? 'Unknown',
+      countryName: 'Unknown',
       requests: group.sum?.requests ?? 0,
       visitors: 0,
       bandwidth: group.sum?.bytes ?? 0,
@@ -346,10 +345,6 @@ analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ 
           uniq { uniques }
           dimensions { datetime }
         }
-        topCountries: httpRequests1dGroups(limit: 30, filter: { date_geq: "${sinceStr.split('T')[0]}", date_leq: "${untilStr.split('T')[0]}" }) {
-          sum { requests, bytes }
-          dimensions { clientCountryName }
-        }
       }
     }
   }`;
@@ -383,5 +378,5 @@ analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ 
   }
 
   const zone = result.data?.viewer?.zones?.[0];
-  return c.json({ success: true, data: buildAnalyticsSnapshot(domain.id, zoneId, range, zone?.httpRequests1hGroups ?? [], zone?.topCountries ?? []) });
+  return c.json({ success: true, data: buildAnalyticsSnapshot(domain.id, zoneId, range, zone?.httpRequests1hGroups ?? [], []) });
 });
