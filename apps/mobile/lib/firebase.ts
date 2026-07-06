@@ -3,27 +3,24 @@ import * as FirebaseAuth from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
-const runtimeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+type ExpoExtra = {
+  firebaseApiKey?: string;
+  firebaseAuthDomain?: string;
+  firebaseProjectId?: string;
+  firebaseStorageBucket?: string;
+  firebaseMessagingSenderId?: string;
+  firebaseAppId?: string;
+};
+
+const expoExtra = (Constants.expoConfig?.extra ?? {}) as ExpoExtra;
 
 const firebaseConfig = {
-  apiKey:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_API_KEY'] ??
-    (Constants.expoConfig?.extra?.['firebaseApiKey'] as string | undefined),
-  authDomain:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN'] ??
-    (Constants.expoConfig?.extra?.['firebaseAuthDomain'] as string | undefined),
-  projectId:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_PROJECT_ID'] ??
-    (Constants.expoConfig?.extra?.['firebaseProjectId'] as string | undefined),
-  storageBucket:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET'] ??
-    (Constants.expoConfig?.extra?.['firebaseStorageBucket'] as string | undefined),
-  messagingSenderId:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'] ??
-    (Constants.expoConfig?.extra?.['firebaseMessagingSenderId'] as string | undefined),
-  appId:
-    runtimeEnv?.['EXPO_PUBLIC_FIREBASE_APP_ID'] ??
-    (Constants.expoConfig?.extra?.['firebaseAppId'] as string | undefined),
+  apiKey: expoExtra.firebaseApiKey,
+  authDomain: expoExtra.firebaseAuthDomain,
+  projectId: expoExtra.firebaseProjectId,
+  storageBucket: expoExtra.firebaseStorageBucket,
+  messagingSenderId: expoExtra.firebaseMessagingSenderId,
+  appId: expoExtra.firebaseAppId,
 };
 
 const missingConfig = Object.entries(firebaseConfig)
@@ -31,7 +28,7 @@ const missingConfig = Object.entries(firebaseConfig)
   .map(([key]) => key);
 
 if (missingConfig.length > 0) {
-  throw new Error(`Missing Firebase config: ${missingConfig.join(', ')}`);
+  throw new Error(`Missing Firebase config from Expo extra: ${missingConfig.join(', ')}`);
 }
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();

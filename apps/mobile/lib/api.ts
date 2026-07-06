@@ -1,10 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 import { useAuthStore } from '@/stores/auth-store';
 
-const runtimeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
 const DEFAULT_BASE_URL = 'https://sparqplug-api.hligon.workers.dev/api/v1';
 const DEFAULT_TIMEOUT_MS = 15000;
-const BASE_URL = (runtimeEnv?.['EXPO_PUBLIC_API_BASE_URL'] ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+const expoExtra = (Constants.expoConfig?.extra ?? {}) as { apiBaseUrl?: string };
+const BASE_URL = (expoExtra.apiBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
 const TOKEN_KEY = 'sparqplug_firebase_token';
 
 async function getToken(): Promise<string | null> {
