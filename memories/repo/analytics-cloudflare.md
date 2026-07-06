@@ -1,0 +1,4 @@
+- Cloudflare analytics limits vary by zone and dataset; `httpRequestsAdaptiveGroups` may reject 7d queries for some zones with errors like `cannot request a time range wider than 1d`.
+- Keep timeseries and adaptive breakdown queries separate so top-pages/top-countries can clamp to the zone's allowed window without failing the whole snapshot.
+- Parse GraphQL error text for `wider than Nd/Nh/Nw` and retry adaptive breakdowns with that shorter window.
+- `httpRequestsAdaptiveGroups` supports `sum { visits, edgeResponseBytes }` in this integration, not `sum { requests }`.

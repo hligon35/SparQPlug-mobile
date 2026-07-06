@@ -280,8 +280,33 @@ export function AnalyticsPage() {
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-foreground">Analytics</h1>
+          {domains.length > 0 ? (
+            <select
+              aria-label="Selected analytics domain"
+              value={selectedDomain ?? ''}
+              onChange={(event) => setSelectedDomain(event.target.value || null)}
+              className="h-9 min-w-[220px] rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              {domains.map((domain) => (
+                <option key={domain.id} value={domain.zoneId}>
+                  {domain.name}{domain.status === 'inactive' ? ' (inactive)' : ''}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {selectedDomainRecord ? (
+            <button
+              type="button"
+              onClick={() => deleteDomainMutation.mutate(selectedDomainRecord.id)}
+              disabled={deleteDomainMutation.isPending}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              Remove
+            </button>
+          ) : null}
           <p className="text-sm text-muted-foreground">Cloudflare traffic insights</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -302,27 +327,6 @@ export function AnalyticsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        {domains.map((d) => (
-          <div key={d.id} className={`inline-flex items-center gap-1 rounded-md border ${selectedDomain === d.zoneId ? 'border-primary bg-primary/10' : 'border-border bg-card'}`}>
-            <button
-              onClick={() => setSelectedDomain(d.zoneId)}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm transition-colors ${selectedDomain === d.zoneId ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-            >
-              <Globe className="h-3.5 w-3.5" />
-              {d.name}
-              {d.status === 'inactive' ? <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">inactive</span> : null}
-            </button>
-            <button
-              type="button"
-              onClick={() => deleteDomainMutation.mutate(d.id)}
-              className="mr-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
-              aria-label={`Remove ${d.name}`}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
-
         <div className="ml-auto flex items-center gap-1 bg-muted rounded-lg p-1">
           {DATE_RANGES.map((r) => (
             <button

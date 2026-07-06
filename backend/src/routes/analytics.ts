@@ -19,14 +19,18 @@ type GraphqlGroup = {
     requests?: number;
     pageViews?: number;
     bytes?: number;
+    edgeResponseBytes?: number;
     threats?: number;
     cachedRequests?: number;
+    visits?: number;
   };
   uniq?: {
     uniques?: number;
   };
   dimensions?: {
     datetime?: string;
+    date?: string;
+    metric?: string;
   };
 };
 
@@ -35,12 +39,63 @@ type GraphqlResponse = {
     viewer?: {
       zones?: Array<{
         httpRequests1hGroups?: GraphqlGroup[];
+        httpRequests1dGroups?: GraphqlGroup[];
+        topPaths?: GraphqlGroup[];
         topCountries?: GraphqlGroup[];
       }>;
     };
   };
   errors?: Array<{ message?: string }>;
 };
+
+function durationTokenToMs(value: string) {
+  const match = value.trim().toLowerCase().match(/^(\d+)([hdw])$/);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  switch (unit) {
+    case 'h':
+      return amount * 60 * 60 * 1000;
+    case 'd':
+      return amount * 24 * 60 * 60 * 1000;
+    case 'w':
+      return amount * 7 * 24 * 60 * 60 * 1000;
+    default:
+      return null;
+  }
+}
+
+function getGraphqlRangeLimitMs(message?: string) {
+  if (!message) return null;
+  const match = message.match(/wider than\s+([0-9]+[hdw])/i);
+  const duration = match?.[1];
+  return duration ? durationTokenToMs(duration) : null;
+}
+
+async function executeCloudflareGraphql(c: { env: Bindings }, query: string) {
+  const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getCloudflareToken(c)}`,
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch analytics from Cloudflare (HTTP ${response.status})`);
+  }
+
+  const result = (await response.json()) as GraphqlResponse;
+  if (result.errors?.length) {
+    throw new Error(result.errors[0]?.message ?? 'Failed to fetch analytics');
+  }
+
+  return result;
+}
 
 function normalizeDomainName(input: string) {
   const trimmed = input.trim().toLowerCase();
@@ -120,6 +175,7 @@ function buildAnalyticsSnapshot(
   zoneId: string,
   range: string,
   requestGroups: GraphqlGroup[],
+  topPathGroups: GraphqlGroup[],
   countryGroups: GraphqlGroup[],
 ) {
   const totals = requestGroups.reduce(
@@ -136,7 +192,7 @@ function buildAnalyticsSnapshot(
   );
 
   const timeseries = requestGroups.map((group) => ({
-    timestamp: group.dimensions?.datetime ?? new Date().toISOString(),
+    timestamp: group.dimensions?.datetime ?? group.dimensions?.date ?? new Date().toISOString(),
     requests: group.sum?.requests ?? 0,
     visitors: group.uniq?.uniques ?? 0,
     bandwidth: group.sum?.bytes ?? 0,
@@ -165,14 +221,22 @@ function buildAnalyticsSnapshot(
     },
     timeseries,
     trafficTimeseries: timeseries,
-    topPages: [],
+    topPages: topPathGroups
+      .filter((group) => Boolean(group.dimensions?.metric))
+      .map((group) => ({
+        url: group.dimensions?.metric ?? '/',
+        path: group.dimensions?.metric ?? '/',
+        requests: group.sum?.requests ?? group.sum?.visits ?? 0,
+        visitors: group.sum?.visits ?? 0,
+        avgDuration: 0,
+      })),
     topCountries: countryGroups.map((group) => ({
-      country: 'Unknown',
+      country: group.dimensions?.metric ?? 'Unknown',
       countryCode: '',
-      countryName: 'Unknown',
-      requests: group.sum?.requests ?? 0,
-      visitors: 0,
-      bandwidth: group.sum?.bytes ?? 0,
+      countryName: group.dimensions?.metric ?? 'Unknown',
+      requests: group.sum?.requests ?? group.sum?.visits ?? 0,
+      visitors: group.sum?.visits ?? 0,
+      bandwidth: group.sum?.edgeResponseBytes ?? group.sum?.bytes ?? 0,
     })),
     securityEvents: [],
     dateFilter: { range },
@@ -336,47 +400,96 @@ analyticsRouter.get('/domains/:zoneId/snapshot', zValidator('query', z.object({ 
 
   const sinceStr = since ?? sinceDate.toISOString();
   const untilStr = until ?? now.toISOString();
+  const untilDate = new Date(untilStr);
+  const requestedSpanMs = new Date(untilStr).getTime() - new Date(sinceStr).getTime();
+  const useDailyGroups = requestedSpanMs > 3 * 24 * 60 * 60 * 1000;
+  const maxBreakdownWindowMs = 30 * 24 * 60 * 60 * 1000;
+  let topBreakdownSince = requestedSpanMs > maxBreakdownWindowMs
+    ? new Date(untilDate.getTime() - maxBreakdownWindowMs).toISOString()
+    : sinceStr;
 
-  const query = `{
-    viewer {
-      zones(filter: { zoneTag: "${zoneId}" }) {
-        httpRequests1hGroups(limit: 168, filter: { datetime_geq: "${sinceStr}", datetime_leq: "${untilStr}" }) {
+  const analyticsNode = useDailyGroups
+    ? `httpRequests1dGroups(limit: 120, filter: { date_geq: "${sinceStr.split('T')[0]}", date_leq: "${untilStr.split('T')[0]}" }) {
+          sum { requests, pageViews, bytes, threats, cachedRequests, cachedBytes }
+          uniq { uniques }
+          dimensions { date }
+        }`
+    : `httpRequests1hGroups(limit: 168, filter: { datetime_geq: "${sinceStr}", datetime_leq: "${untilStr}" }) {
           sum { requests, pageViews, bytes, threats, cachedRequests, cachedBytes }
           uniq { uniques }
           dimensions { datetime }
-        }
+        }`;
+
+  const analyticsQuery = `{
+    viewer {
+      zones(filter: { zoneTag: "${zoneId}" }) {
+        ${analyticsNode}
       }
     }
   }`;
 
-  const resp = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getCloudflareToken(c)}`,
-    },
-    body: JSON.stringify({ query }),
-  });
+  try {
+    const analyticsResult = await executeCloudflareGraphql(c, analyticsQuery);
+    const analyticsZone = analyticsResult.data?.viewer?.zones?.[0];
+    const requestGroups = useDailyGroups ? (analyticsZone?.httpRequests1dGroups ?? []) : (analyticsZone?.httpRequests1hGroups ?? []);
 
-  if (!resp.ok) {
-    return c.json({ success: false, error: { code: 'ANALYTICS_ERROR', message: `Failed to fetch analytics from Cloudflare (HTTP ${resp.status})` } }, 502);
-  }
+    const buildBreakdownQuery = (breakdownSince: string) => {
+      const breakdownFilter = `filter: { AND: [{ datetime_geq: "${breakdownSince}", datetime_leq: "${untilStr}" }, { requestSource: "eyeball" }] }`;
 
-  const result = (await resp.json()) as GraphqlResponse;
+      return `{
+        viewer {
+          zones(filter: { zoneTag: "${zoneId}" }) {
+            topPaths: httpRequestsAdaptiveGroups(${breakdownFilter}, limit: 10, orderBy: [sum_edgeResponseBytes_DESC]) {
+              sum { visits, edgeResponseBytes }
+              dimensions { metric: clientRequestPath }
+            }
+            topCountries: httpRequestsAdaptiveGroups(${breakdownFilter}, limit: 10, orderBy: [sum_visits_DESC]) {
+              sum { visits, edgeResponseBytes }
+              dimensions { metric: clientCountryName }
+            }
+          }
+        }
+      }`;
+    };
 
-  if (result.errors?.length) {
+    let topPaths: GraphqlGroup[] = [];
+    let topCountries: GraphqlGroup[] = [];
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const breakdownResult = await executeCloudflareGraphql(c, buildBreakdownQuery(topBreakdownSince));
+        const breakdownZone = breakdownResult.data?.viewer?.zones?.[0];
+        topPaths = breakdownZone?.topPaths ?? [];
+        topCountries = breakdownZone?.topCountries ?? [];
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to fetch analytics breakdowns';
+        const rangeLimitMs = getGraphqlRangeLimitMs(message);
+
+        if (!rangeLimitMs) {
+          break;
+        }
+
+        const clampedSince = new Date(untilDate.getTime() - rangeLimitMs).toISOString();
+        if (clampedSince >= topBreakdownSince) {
+          break;
+        }
+
+        topBreakdownSince = clampedSince;
+      }
+    }
+
+    return c.json({ success: true, data: buildAnalyticsSnapshot(domain.id, zoneId, range, requestGroups, topPaths, topCountries) });
+  } catch (error) {
     return c.json(
       {
         success: false,
         error: {
           code: 'ANALYTICS_ERROR',
-          message: result.errors[0]?.message ?? 'Failed to fetch analytics',
+          message: error instanceof Error ? error.message : 'Failed to fetch analytics',
         },
       },
       502,
     );
   }
-
-  const zone = result.data?.viewer?.zones?.[0];
-  return c.json({ success: true, data: buildAnalyticsSnapshot(domain.id, zoneId, range, zone?.httpRequests1hGroups ?? [], []) });
 });
