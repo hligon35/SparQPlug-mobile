@@ -257,6 +257,7 @@ export function AnalyticsPage() {
 
   const domains = domainsData?.data?.items ?? [];
   const zones = zonesData?.data ?? [];
+  const selectedZone = zones.find((zone) => zone.id === selectedZoneId);
 
   useEffect(() => {
     if (!selectedDomain && domains[0]) {
@@ -464,6 +465,7 @@ export function AnalyticsPage() {
                 const value = event.target.value;
                 setDomainName(value);
                 setZoneSearch(value);
+                setSelectedZoneId('');
               }}
               placeholder="example.com"
             />
@@ -472,7 +474,15 @@ export function AnalyticsPage() {
             <label className="text-xs font-medium text-muted-foreground">Cloudflare zone</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input className={`${inputClass} pl-9`} value={zoneSearch} onChange={(event) => setZoneSearch(event.target.value)} placeholder="Search Cloudflare zones" />
+              <input
+                className={`${inputClass} pl-9`}
+                value={zoneSearch}
+                onChange={(event) => {
+                  setZoneSearch(event.target.value);
+                  setSelectedZoneId('');
+                }}
+                placeholder="Search Cloudflare zones"
+              />
             </div>
             <div className="max-h-60 overflow-y-auto rounded-md border border-border bg-card p-2">
               {zonesLoading ? (
@@ -490,6 +500,7 @@ export function AnalyticsPage() {
                         onClick={() => {
                           setSelectedZoneId(zone.id);
                           setDomainName(zone.name);
+                          setZoneSearch(zone.name);
                         }}
                         className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'}`}
                       >
@@ -501,6 +512,7 @@ export function AnalyticsPage() {
                 </div>
               )}
             </div>
+            {selectedZone ? <p className="text-xs text-muted-foreground">Selected zone: {selectedZone.name}</p> : null}
             <p className="text-xs text-muted-foreground">Cloudflare credentials are read from the deployed backend environment.</p>
           </div>
           <div className="flex justify-end gap-2 pt-1">

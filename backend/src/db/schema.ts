@@ -70,6 +70,34 @@ export const users = sqliteTable(
   }),
 );
 
+// ─── API Keys ────────────────────────────────────────────────────────────────
+
+export const apiKeys = sqliteTable(
+  'api_keys',
+  {
+    ...id,
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    keyHash: text('key_hash').notNull(),
+    keyPrefix: text('key_prefix').notNull(),
+    scopes: text('scopes', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    lastUsedAt: text('last_used_at'),
+    expiresAt: text('expires_at'),
+    ...timestamps,
+  },
+  (t) => ({
+    orgIdx: index('api_keys_org_idx').on(t.organizationId),
+    keyHashIdx: uniqueIndex('api_keys_key_hash_idx').on(t.keyHash),
+    keyPrefixIdx: uniqueIndex('api_keys_key_prefix_idx').on(t.keyPrefix),
+    createdByIdx: index('api_keys_created_by_idx').on(t.createdBy),
+  }),
+);
+
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
 export const contacts = sqliteTable(

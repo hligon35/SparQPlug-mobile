@@ -61,7 +61,6 @@ export function CompaniesPage() {
 
   async function refreshCompanyQueries() {
     await Promise.all([
-      refetch(),
       queryClient.invalidateQueries({ queryKey: ['companies'] }),
       queryClient.invalidateQueries({ queryKey: ['companies-list'] }),
     ]);
@@ -97,6 +96,11 @@ export function CompaniesPage() {
   async function finalizeCompanySave(company: Company | undefined, action: 'created' | 'updated') {
     const companyId = company?.id ?? editingCompany?.id;
     const logoUploaded = companyId ? await uploadCompanyLogo(companyId) : true;
+
+    if (action === 'created') {
+      setSearch('');
+      setPage(1);
+    }
 
     await refreshCompanyQueries();
 

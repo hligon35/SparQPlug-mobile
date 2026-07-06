@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Bindings, Variables } from '../index';
 import { createDb } from '../db';
 import { users, organizations, apiKeys } from '../db/schema';
@@ -70,7 +70,7 @@ settingsRouter.get('/api-keys', async (c) => {
   const db = createDb(c.env.DB);
   const keys = await db.query.apiKeys.findMany({ where: eq(apiKeys.organizationId, orgId) });
   // Never return the actual key hash
-  return c.json({ success: true, data: keys.map(k => ({ ...k, keyHash: undefined })) });
+  return c.json({ success: true, data: keys.map((key) => ({ ...key, keyHash: undefined })) });
 });
 
 settingsRouter.post('/api-keys', zValidator('json', z.object({ name: z.string().min(1), scopes: z.array(z.string()).default([]) })), async (c) => {
@@ -99,6 +99,6 @@ settingsRouter.post('/api-keys', zValidator('json', z.object({ name: z.string().
 settingsRouter.delete('/api-keys/:id', async (c) => {
   const orgId = c.get('organizationId');
   const db = createDb(c.env.DB);
-  await db.delete(apiKeys).where(eq(apiKeys.id, c.req.param('id')));
+  await db.delete(apiKeys).where(and(eq(apiKeys.id, c.req.param('id')), eq(apiKeys.organizationId, orgId)));
   return c.json({ success: true, data: { id: c.req.param('id') } });
 });

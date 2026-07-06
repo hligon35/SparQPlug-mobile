@@ -44,7 +44,20 @@ type GraphqlResponse = {
 };
 
 function normalizeDomainName(input: string) {
-  return input.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return '';
+
+  try {
+    const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(withProtocol);
+    return parsed.hostname.replace(/\.+$/, '');
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//, '')
+      .replace(/[/?#].*$/, '')
+      .replace(/:\d+$/, '')
+      .replace(/\.+$/, '');
+  }
 }
 
 function getCloudflareToken(c: { env: Bindings }) {
@@ -242,21 +255,42 @@ analyticsRouter.post('/domains', zValidator('json', z.object({ name: z.string().
   const db = createDb(c.env.DB);
   const normalizedName = normalizeDomainName(name);
 
-  let resolvedZoneId = zoneId?.trim();
-  if (!resolvedZoneId) {
+  try {
     const zones = await fetchCloudflareZones(getCloudflareToken(c), normalizedName);
     const exactZone = zones.find((zone) => normalizeDomainName(zone.name) === normalizedName);
+
     if (!exactZone) {
       return c.json({ success: false, error: { code: 'ZONE_NOT_FOUND', message: 'No matching Cloudflare zone found.' } }, 404);
     }
-    resolvedZoneId = exactZone.id;
-  }
 
-  const zones = await fetchCloudflareZones(getCloudflareToken(c), normalizedName);
-  const matchedZone = zones.find((zone) => zone.id === resolvedZoneId) ?? { id: resolvedZoneId, name: normalizedName, status: 'active' };
-  const result = await upsertAnalyticsDomain(db, orgId, matchedZone);
-  const domain = await db.query.analyticsDomains.findFirst({ where: eq(analyticsDomains.id, result.id) });
-  return c.json({ success: true, data: domain }, result.created ? 201 : 200);
+    if (zoneId?.trim() && exactZone.id !== zoneId.trim()) {
+      return c.json(
+        {
+          success: false,
+          error: {
+            code: 'ZONE_MISMATCH',
+            message: 'The selected Cloudflare zone does not match the requested domain.',
+          },
+        },
+        400,
+      );
+    }
+
+    const result = await upsertAnalyticsDomain(db, orgId, exactZone);
+    const domain = await db.query.analyticsDomains.findFirst({ where: eq(analyticsDomains.id, result.id) });
+    return c.json({ success: true, data: domain }, result.created ? 201 : 200);
+  } catch (error) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'DOMAIN_CREATE_FAILED',
+          message: error instanceof Error ? error.message : 'Unable to add Cloudflare domain',
+        },
+      },
+      502,
+    );
+  }
 });
 
 analyticsRouter.delete('/domains/:id', async (c) => {

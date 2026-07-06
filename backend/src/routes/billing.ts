@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import Stripe from 'stripe';
@@ -65,6 +66,40 @@ function toIsoString(timestamp: number | null | undefined) {
 function normalizeLabel(label: string | null | undefined) {
   const trimmed = label?.trim();
   return trimmed ? trimmed : null;
+}
+
+type BillingRouteContext = Context<{ Bindings: Bindings; Variables: Variables }>;
+
+async function updateInvoiceLabel(c: BillingRouteContext) {
+  const orgId = c.get('organizationId');
+  const invoiceId = c.req.param('id');
+  if (!invoiceId) return c.json({ success: false, error: { code: 'BAD_REQUEST', message: 'Invoice id is required' } }, 400);
+
+  const payload = await c.req.json<{ label?: string | null }>();
+  const label = payload?.label;
+  const db = createDb(c.env.DB);
+  const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, invoiceId), eq(stripeInvoices.organizationId, orgId)) });
+  if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
+
+  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)));
+  const updated = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)), with: { customer: true } });
+  return c.json({ success: true, data: updated });
+}
+
+async function updateSubscriptionLabel(c: BillingRouteContext) {
+  const orgId = c.get('organizationId');
+  const subscriptionId = c.req.param('id');
+  if (!subscriptionId) return c.json({ success: false, error: { code: 'BAD_REQUEST', message: 'Subscription id is required' } }, 400);
+
+  const payload = await c.req.json<{ label?: string | null }>();
+  const label = payload?.label;
+  const db = createDb(c.env.DB);
+  const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, subscriptionId), eq(stripeSubscriptions.organizationId, orgId)) });
+  if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
+
+  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)));
+  const updated = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)), with: { customer: true } });
+  return c.json({ success: true, data: updated });
 }
 
 function mapInvoiceStatus(status: Stripe.Invoice.Status | null | undefined): 'draft' | 'open' | 'paid' | 'void' | 'uncollectible' {
@@ -365,17 +400,9 @@ billingRouter.post('/invoices', zValidator('json', CreateInvoiceSchema), async (
   return c.json({ success: true, data: invoice }, 201);
 });
 
-billingRouter.patch('/invoices/:id', zValidator('json', BillingLabelSchema), async (c) => {
-  const orgId = c.get('organizationId');
-  const { label } = c.req.valid('json');
-  const db = createDb(c.env.DB);
-  const invoice = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, c.req.param('id')), eq(stripeInvoices.organizationId, orgId)) });
-  if (!invoice) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Invoice not found' } }, 404);
+billingRouter.patch('/invoices/:id', zValidator('json', BillingLabelSchema), updateInvoiceLabel);
 
-  await db.update(stripeInvoices).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)));
-  const updated = await db.query.stripeInvoices.findFirst({ where: and(eq(stripeInvoices.id, invoice.id), eq(stripeInvoices.organizationId, orgId)), with: { customer: true } });
-  return c.json({ success: true, data: updated });
-});
+billingRouter.patch('/invoices/:id/label', zValidator('json', BillingLabelSchema), updateInvoiceLabel);
 
 billingRouter.post('/invoices/:id/send', async (c) => {
   const orgId = c.get('organizationId');
@@ -413,17 +440,9 @@ billingRouter.get('/subscriptions', zValidator('query', z.object({ page: z.coerc
   return c.json({ success: true, data: buildPaginatedResult(rows, page, limit, countResult[0]?.count ?? 0) });
 });
 
-billingRouter.patch('/subscriptions/:id', zValidator('json', BillingLabelSchema), async (c) => {
-  const orgId = c.get('organizationId');
-  const { label } = c.req.valid('json');
-  const db = createDb(c.env.DB);
-  const subscription = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, c.req.param('id')), eq(stripeSubscriptions.organizationId, orgId)) });
-  if (!subscription) return c.json({ success: false, error: { code: 'NOT_FOUND', message: 'Subscription not found' } }, 404);
+billingRouter.patch('/subscriptions/:id', zValidator('json', BillingLabelSchema), updateSubscriptionLabel);
 
-  await db.update(stripeSubscriptions).set({ label: normalizeLabel(label), updatedAt: new Date().toISOString() }).where(and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)));
-  const updated = await db.query.stripeSubscriptions.findFirst({ where: and(eq(stripeSubscriptions.id, subscription.id), eq(stripeSubscriptions.organizationId, orgId)), with: { customer: true } });
-  return c.json({ success: true, data: updated });
-});
+billingRouter.patch('/subscriptions/:id/label', zValidator('json', BillingLabelSchema), updateSubscriptionLabel);
 
 billingRouter.get('/metrics', async (c) => {
   const orgId = c.get('organizationId');
