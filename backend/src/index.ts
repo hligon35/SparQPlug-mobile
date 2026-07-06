@@ -107,6 +107,11 @@ app.use(
     exposeHeaders: ['X-Request-Id'],
   }),
 );
+app.use('/api/v1/companies/:id/logo', async (c, next) => {
+  await next();
+  c.res.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  c.res.headers.set('Access-Control-Allow-Origin', '*');
+});
 app.use('*', secureHeaders());
 
 // ─── Health Check ─────────────────────────────────────────────────────────────

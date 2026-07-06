@@ -160,6 +160,8 @@ companiesRouter.get('/:id/logo', async (c) => {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set('Cache-Control', 'public, max-age=300');
+  headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  headers.set('Access-Control-Allow-Origin', '*');
 
   return new Response(object.body, { headers });
 });
